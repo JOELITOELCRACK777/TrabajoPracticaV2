@@ -1,0 +1,199 @@
+/* 1. IMPORTAMOS LA NUEVA FUENTE (Montserrat) */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;800&display=swap');
+
+:root {
+    /* PALETA CLÍNICA MODERNA */
+    --clinic-blue-deep: #00264d;  /* Azul oscuro elegante */
+    --clinic-blue-mid: #005b96;   /* Azul médico estándar */
+    --accent-cyan: #0dcaf0;       /* Tu cyan original para acentos */
+    --text-white: #ffffff;
+    --text-dim: #cfdce8;          /* Blanco azulado suave */
+    --sidebar-width: 350px;
+    
+    /* Variables de espaciado */
+    --padding-std: 30px;
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #000;
+    /* Cambio de fuente a Montserrat */
+    font-family: 'Montserrat', sans-serif;
+    color: var(--text-white);
+}
+
+/* --- ESTRUCTURA PRINCIPAL (INTACTA) --- */
+.app {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+}
+
+/* --- SECCIÓN DEL VIDEO (INTACTA) --- */
+.player-section {
+    position: relative;
+    flex: 1; 
+    background-color: #000;
+    overflow: hidden;
+    transition: all 0.5s ease;
+}
+
+.main-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.video-vignette {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    box-shadow: inset -50px 0 100px rgba(0,0,0,0.8);
+    pointer-events: none;
+}
+
+/* --- BARRA LATERAL (DISEÑO MEJORADO) --- */
+.sidebar-right {
+    /* Nuevo Fondo: Gradiente Azul Clínica */
+    background: linear-gradient(160deg, var(--clinic-blue-deep) 0%, var(--clinic-blue-mid) 100%);
+    
+    /* Borde sutil brillante a la izquierda */
+    border-left: 1px solid rgba(255,255,255,0.15);
+    
+    /* Sombra más profunda para dar sensación de capa flotante */
+    box-shadow: -10px 0 40px rgba(0, 10, 30, 0.6);
+    
+    z-index: 10;
+    overflow: hidden; 
+    white-space: nowrap; 
+
+    /* LÓGICA DE ANIMACIÓN INTACTA (90s) */
+    animation: pushCycle 90s infinite ease-in-out;
+    
+    /* Flexbox vertical para organizar los elementos dentro de la barra */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* Distribuye espacio arriba y abajo */
+}
+
+/* --- KEYFRAMES (INTACTOS) --- */
+@keyframes pushCycle {
+    0% { 
+        width: 0; min-width: 0; opacity: 0; 
+        padding-left: 0; padding-right: 0; border-left: 0px solid transparent;
+    }
+    2% { 
+        width: var(--sidebar-width); min-width: 300px; opacity: 1; 
+        border-left: 1px solid rgba(255,255,255,0.1);
+    }
+    33% { 
+        width: var(--sidebar-width); min-width: 300px; opacity: 1; 
+        border-left: 1px solid rgba(255,255,255,0.1);
+    }
+    35% { 
+        width: 0; min-width: 0; opacity: 0; 
+        padding-left: 0; padding-right: 0; border-left: 0px solid transparent;
+    }
+    100% { 
+        width: 0; min-width: 0; opacity: 0; 
+        padding-left: 0; padding-right: 0; border-left: 0px solid transparent;
+    }
+}
+
+
+
+/* 1. HEADER / MARCA */
+.brand-name {
+    font-weight: 800;
+    font-size: 1.8rem;
+    text-transform: uppercase; 
+    letter-spacing: 2px;
+    color: var(--text-white);
+    padding: var(--padding-std);
+    border-bottom: 1px solid rgba(255,255,255,0.1); 
+    margin-bottom: auto; 
+}
+
+.brand-name span { 
+    color: var(--accent-cyan); 
+}
+
+/* 2. RELOJ (EL PROTAGONISTA) */
+.time-container {
+    padding: 0 var(--padding-std);
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.time-display {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 5rem; /* Más grande */
+    font-weight: 300; /* Fuente fina (Thin) se ve muy moderna en pantallas grandes */
+    line-height: 1;
+    color: var(--text-white);
+    letter-spacing: -2px;
+    text-shadow: 0 0 30px rgba(13, 202, 240, 0.4); 
+}
+
+.date-display {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-weight: 600;
+    margin-top: 10px;
+
+    text-shadow: 
+        0 0 15px rgba(13, 202, 240, 0.5),
+        0 0 30px rgba(13, 202, 240, 0.2);
+}
+
+/* 3. CLIMA (Estilo Tarjeta / Widget) */
+.weather-section {
+    margin: var(--padding-std);
+    padding: 25px;
+    /* Fondo semitransparente (Glass effect) */
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 20px; /* Bordes redondeados modernos */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+#clima-icon { 
+    font-size: 3.5rem; 
+    margin-bottom: 10px;
+    filter: drop-shadow(0 0 10px rgba(255,255,255,0.3));
+}
+
+#temperatura { 
+    font-size: 3rem; 
+    font-weight: 700; 
+    color: var(--text-white);
+}
+
+#ciudad { 
+    font-size: 0.9rem; 
+    letter-spacing: 1.5px; 
+    text-transform: uppercase;
+    color: var(--accent-cyan); 
+    font-weight: 700; 
+    margin-top: 5px;
+}
+
+/* Ajustes para Pantallas 4K */
+@media (min-width: 2000px) {
+    :root { --sidebar-width: 500px; }
+    .time-display { font-size: 7rem; }
+    .brand-name { font-size: 2.5rem; }
+    #temperatura { font-size: 4rem; }
+}
