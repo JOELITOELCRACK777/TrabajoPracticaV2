@@ -47,9 +47,9 @@
 
             <div id="step-code" class="menu-step d-none">
                 <h3 class="mb-3">Ingrese Código de Gestión</h3>
-                <p class="small text-white-50 mb-4">Formato: MEDICO, NUMERO, INTENSIDAD (Ej: PEREZ, 12, A)</p>
+                <p class="small text-white-50 mb-4">Formato: SUJETO, NUMERO, INTENSIDAD</p>
                 
-                <input type="text" id="admin-code" class="form-control form-control-lg mb-3 text-center" placeholder="EJ: PEREZ, 12, A">
+                <input type="text" id="admin-code" class="form-control form-control-lg mb-3 text-center" placeholder="MEDICO, 12, ALTA">
                 
                 <button class="btn btn-info btn-lg w-100 text-white fw-bold" onclick="clinicManager.processCode()">
                     IR A CARPETA
@@ -69,8 +69,8 @@
         <aside class="sidebar-right">
             <div class="container-fluid h-100 py-5 d-flex flex-column justify-content-between">
                 <div class="brand-section text-center">
-                    <div class="brand-box mb-3">
-                        <h1 class="brand-name mb-0">SAN <span>JOSÉ</span></h1>
+                    <div>
+                        <img class="logo-clinica" src="img/logoclinica.png" width="150" height="150">
                     </div>
                 </div>
 
@@ -84,8 +84,9 @@
                     <h2 id="temperatura" class="mb-0">--°C</h2>
                     <p id="ciudad" class="mb-3 opacity-75">ARICA, CHILE</p>
                     <div class="hospital-ticker border-top border-light border-opacity-10 pt-3 mt-3">
-                        <p class="mb-0 text-white-50 x-small-text">CALIDAD Y CALIDEZ</p>
-                    </div>
+                        <p class="mb-0 text-white-50 x-small-text">SALUD</p>
+                        <p class="mb-0 text-white-50 x-small-text">Accesible, Confiable y Calida</p>
+                    </div> 
                 </div>
             </div>
         </aside>

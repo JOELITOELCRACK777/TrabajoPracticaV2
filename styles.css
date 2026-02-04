@@ -23,7 +23,7 @@ body, html {
     color: var(--text-white);
 }
 
-/* === NUEVOS ESTILOS: MENÚ OVERLAY === */
+
 .overlay-menu {
     position: absolute;
     top: 0;
