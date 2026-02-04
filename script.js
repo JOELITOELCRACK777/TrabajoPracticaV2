@@ -1,29 +1,56 @@
 class TVIPlayer {
     constructor() {
-        // --- TUS DATOS CONFIGURADOS ---
+        // --- DATOS DE CONFIGURACIÓN ---
         this.cloudName = 'dpgpfeadd';     
         this.tagName = 'modo_tv';   
 
         this.videoElement = document.getElementById('main-player');
         this.playlist = [];
         this.currentIndex = 0;
+        this.isFading = false; // Bandera para controlar el desvanecimiento
 
-        // Binds para no perder el contexto 'this'
+        // Binds
         this.handleVideoEnd = this.handleVideoEnd.bind(this);
+        this.checkFadeOut = this.checkFadeOut.bind(this);
+
+        // --- ASIGNACIÓN DE EVENTOS ---
         this.videoElement.onended = this.handleVideoEnd;
+        
+        // Evento para detectar cuándo bajar la opacidad (Fade Out)
+        this.videoElement.ontimeupdate = this.checkFadeOut;
+
+        // Seguridad: Si hay error, saltamos al siguiente inmediatamente
         this.videoElement.onerror = () => {
-            console.warn("Error al reproducir video, saltando al siguiente...");
-            this.handleVideoEnd();
+            console.warn("⚠️ Error en el video, saltando...");
+            this.videoElement.classList.remove('video-fade-out'); // Asegurar visibilidad
+            this.handleVideoEnd(); 
         };
 
         this.init();
     }
 
+    // --- NUEVA FUNCIÓN: Controla el desvanecimiento antes de terminar ---
+    checkFadeOut() {
+        // Si no hay duración o ya estamos desvaneciendo, no hacemos nada
+        if (!this.videoElement.duration || this.isFading) return;
+
+        const timeLeft = this.videoElement.duration - this.videoElement.currentTime;
+
+        // Cuando falten 2.5 segundos, activamos la oscuridad
+        if (timeLeft < 2.5) {
+            this.isFading = true; // Marcamos que ya empezamos
+            this.videoElement.classList.add('video-fade-out');
+        }
+    }
+
     async init() {
         console.log("Iniciando TV Clínica San José...");
+        
+        // Empezamos en negro para una entrada elegante
+        this.videoElement.classList.add('video-fade-out');
+        
         await this.loadPlaylist();
         
-        // Arrancamos si hay videos
         if (this.playlist.length > 0) {
             this.playVideo(0);
         }
@@ -31,89 +58,99 @@ class TVIPlayer {
 
     async loadPlaylist() {
         console.log("🔄 Buscando actualizaciones de lista...");
-        
-        // Añadimos timestamp para evitar caché
         const listUrl = `https://res.cloudinary.com/${this.cloudName}/video/list/${this.tagName}.json?t=${Date.now()}`;
 
         try {
             const response = await fetch(listUrl);
-            
             if (!response.ok) {
-                // Si falla (ej: 404 porque no hay videos aun), no rompemos nada
-                console.warn("⚠️ No se pudo cargar la lista JSON. ¿Tal vez no hay videos con esa etiqueta?");
+                console.warn("⚠️ No se pudo cargar la lista JSON.");
                 return;
             }
 
             const data = await response.json();
-
-            // 1. ORDENAMIENTO (Por nombre)
+            
+            // 1. ORDENAMIENTO
             data.resources.sort((a, b) => a.public_id.localeCompare(b.public_id));
 
-            // 2. CONSTRUCCIÓN DE URLS ROBUSTA
+            // 2. CONSTRUCCIÓN DE URLS
             const newPlaylist = data.resources.map(video => {
-                // TRUCO: Codificamos el public_id por si tiene espacios o tildes
-                // Y forzamos la extensión .mp4 al final para máxima compatibilidad
-                const safeId = encodeURIComponent(video.public_id); // Espacios -> %20
-                
-                // Url final forzando formato MP4
-                return `https://res.cloudinary.com/${this.cloudName}/video/upload/q_auto/v${video.version}/${video.public_id}.mp4`;
+                // Mantenemos tu lógica de codificación
+                return `https://res.cloudinary.com/${this.cloudName}/video/upload/q_auto/v${video.version}/${encodeURIComponent(video.public_id)}.mp4`;
             });
 
             this.playlist = newPlaylist;
-            
-            // 3. REPORTE VISUAL EN CONSOLA (Para que veas si los cargó)
-            console.group("📺 Lista de Reproducción Actualizada");
+            console.group("📺 Lista Actualizada");
             console.table(this.playlist);
             console.groupEnd();
 
         } catch (error) {
-            console.error("❌ Error crítico actualizando playlist:", error);
+            console.error("❌ Error playlist:", error);
         }
     }
 
     playVideo(index) {
-        // Validación de seguridad
         if (this.playlist.length === 0) return;
 
-        // Establecer índice actual
         this.currentIndex = index;
         
-        // Cargar fuente
+        // 1. PREPARACIÓN: Aseguramos pantalla negra antes de cargar el nuevo
+        // Esto evita que se vea el frame del video anterior
+        this.videoElement.classList.add('video-fade-out');
+        this.isFading = false; // Reiniciamos bandera para el nuevo video
+
+        // 2. CARGA
         this.videoElement.src = this.playlist[this.currentIndex];
         
-        // Intentar reproducir
+        // 3. REPRODUCCIÓN (Con seguridad anti-pantalla negra)
         const playPromise = this.videoElement.play();
+
         if (playPromise !== undefined) {
-            playPromise.catch(error => {
-                console.log("Autoplay bloqueado o error de carga. Interactúa con la pantalla si es la primera vez.", error);
-            });
+            playPromise
+                .then(() => {
+                    // ÉXITO: El video ya está corriendo en el motor del navegador.
+                    // Esperamos 100ms para asegurar que el buffer tiene imagen y hacemos el Fade In.
+                    setTimeout(() => {
+                        this.videoElement.classList.remove('video-fade-out');
+                    }, 100);
+                })
+                .catch(error => {
+                    console.log("Autoplay bloqueado o error.", error);
+                    // SEGURIDAD: Si falla el play, quitamos la oscuridad igual
+                    // para que se vea el poster o el error y no quede todo negro.
+                    this.videoElement.classList.remove('video-fade-out');
+                });
         }
     }
 
-    async handleVideoEnd() {
-        const nextIndex = this.currentIndex + 1;
+    handleVideoEnd() {
+        console.log("⏹️ Video terminado. Esperando 3 segundos...");
 
-        // Si llegamos al final de la lista
-        if (nextIndex >= this.playlist.length) {
-            console.log("Ciclo terminado. Verificando si hay videos nuevos...");
+        // 1. Forzamos oscuridad (por si el checkFadeOut no se disparó exacto)
+        this.videoElement.classList.add('video-fade-out');
+        this.isFading = true; // Bloqueamos checks durante la pausa
+
+        // 2. LA PAUSA DE 3 SEGUNDOS
+        setTimeout(async () => {
             
-            // Intentamos recargar la lista antes de volver a empezar
-            await this.loadPlaylist();
-            
-            // Reiniciamos al primero
-            this.playVideo(0);
-        } else {
-            // Pasamos al siguiente
-            this.playVideo(nextIndex);
-        }
+            const nextIndex = this.currentIndex + 1;
+
+            if (nextIndex >= this.playlist.length) {
+                console.log("Ciclo terminado. Recargando...");
+                // Esperamos la recarga antes de dar play
+                await this.loadPlaylist(); 
+                this.playVideo(0);
+            } else {
+                this.playVideo(nextIndex);
+            }
+
+        }, 3000); // 3000ms = 3 Segundos de pantalla negra
     }
 }
 
-// --- FUNCIONES EXTRAS: RELOJ Y CLIMA (ARICA) - NO MODIFICADAS ---
+// --- FUNCIONES EXTRAS (SIN CAMBIOS) ---
 
 function updateClock() {
     const now = new Date();
-    
     const timeString = now.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
     const horaEl = document.getElementById('hora');
     if(horaEl) horaEl.innerText = timeString;

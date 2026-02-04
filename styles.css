@@ -47,6 +47,13 @@ body, html {
     height: 100%;
     object-fit: cover;
     display: block;
+
+    transition: opacity 2s ease-in-out; 
+    opacity: 1;
+}
+
+.video-fade-out {
+    opacity: 0 !important;
 }
 
 .video-vignette {
