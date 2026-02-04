@@ -3,22 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clínica San José TV</title>
+    <title>Clínica San José TV - Sistema Inteligente</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Lexend:wght@600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
+    <section id="clinic-menu" class="overlay-menu d-flex align-items-center justify-content-center">
+        <div class="menu-container text-center p-5">
+            
+            <div id="step-select" class="menu-step active">
+                <h1 class="mb-4">Bienvenido al Sistema Multimedia</h1>
+                <p class="mb-4 text-white-50">Seleccione su ubicación para configurar:</p>
+                <div class="d-grid gap-3 col-8 mx-auto">
+                    <button class="btn btn-clinic btn-lg" onclick="clinicManager.selectClinic('Clinica 1')">Clínica San José</button>
+                    <button class="btn btn-clinic btn-lg" onclick="clinicManager.selectClinic('Clinica 2')">Clínica Tarapacá</button>
+                    <button class="btn btn-clinic btn-lg" onclick="clinicManager.selectClinic('Clinica 3')">Clinica ImagenSalud</button>
+                </div>
+            </div>
+
+            <div id="step-decision" class="menu-step d-none">
+                <h2 id="clinic-title-display" class="mb-4">Clínica Seleccionada</h2>
+                <div class="d-grid gap-3 col-8 mx-auto">
+                    <button class="btn btn-success btn-lg py-3" onclick="clinicManager.activatePlaylist()">
+                        ▶ ACTIVAR PLAYLIST
+                    </button>
+                    <button class="btn btn-outline-light btn-lg" onclick="clinicManager.askModify()">
+                        ⚙️ MODIFICAR CONTENIDO
+                    </button>
+                </div>
+                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Volver</button>
+            </div>
+
+            <div id="step-add-content" class="menu-step d-none">
+                <h3 class="mb-4">¿Quieres añadir contenido multimedia?</h3>
+                <div class="d-flex justify-content-center gap-3">
+                    <button class="btn btn-primary btn-lg px-5" onclick="clinicManager.showCodeInput()">SÍ</button>
+                    <button class="btn btn-secondary btn-lg px-5" onclick="clinicManager.activatePlaylist()">NO (Solo reproducir)</button>
+                </div>
+                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Cancelar</button>
+            </div>
+
+            <div id="step-code" class="menu-step d-none">
+                <h3 class="mb-3">Ingrese Código de Gestión</h3>
+                <p class="small text-white-50 mb-4">Formato: MEDICO, NUMERO, INTENSIDAD (Ej: PEREZ, 12, A)</p>
+                
+                <input type="text" id="admin-code" class="form-control form-control-lg mb-3 text-center" placeholder="EJ: PEREZ, 12, A">
+                
+                <button class="btn btn-info btn-lg w-100 text-white fw-bold" onclick="clinicManager.processCode()">
+                    IR A CARPETA
+                </button>
+                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Cancelar</button>
+            </div>
+
+        </div>
+    </section>
+
     <div class="app d-flex">
-        
         <main class="player-section flex-grow-1">
-            <video id="main-player" autoplay muted playsinline class="main-video"></video>
+            <video id="main-player" muted playsinline class="main-video"></video>
             <div class="video-vignette"></div>
         </main>
 
         <aside class="sidebar-right">
             <div class="container-fluid h-100 py-5 d-flex flex-column justify-content-between">
-                
                 <div class="brand-section text-center">
                     <div class="brand-box mb-3">
                         <h1 class="brand-name mb-0">SAN <span>JOSÉ</span></h1>
@@ -34,15 +83,14 @@
                     <span id="clima-icon" class="d-block mb-2">☀️</span>
                     <h2 id="temperatura" class="mb-0">--°C</h2>
                     <p id="ciudad" class="mb-3 opacity-75">ARICA, CHILE</p>
-                    
                     <div class="hospital-ticker border-top border-light border-opacity-10 pt-3 mt-3">
                         <p class="mb-0 text-white-50 x-small-text">CALIDAD Y CALIDEZ</p>
                     </div>
                 </div>
-
             </div>
         </aside>
     </div>
+    
     <script src="script.js"></script>
 </body>
 </html>

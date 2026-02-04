@@ -3,14 +3,12 @@
 
 :root {
     /* PALETA CLÍNICA MODERNA */
-    --clinic-blue-deep: #00264d;  /* Azul oscuro elegante */
-    --clinic-blue-mid: #005b96;   /* Azul médico estándar */
-    --accent-cyan: #0dcaf0;       /* Tu cyan original para acentos */
+    --clinic-blue-deep: #00264d;
+    --clinic-blue-mid: #005b96;
+    --accent-cyan: #0dcaf0;
     --text-white: #ffffff;
-    --text-dim: #cfdce8;          /* Blanco azulado suave */
+    --text-dim: #cfdce8;
     --sidebar-width: 350px;
-    
-    /* Variables de espaciado */
     --padding-std: 30px;
 }
 
@@ -21,25 +19,75 @@ body, html {
     height: 100%;
     overflow: hidden;
     background-color: #000;
-    /* Cambio de fuente a Montserrat */
     font-family: 'Montserrat', sans-serif;
     color: var(--text-white);
 }
 
-/* --- ESTRUCTURA PRINCIPAL (INTACTA) --- */
+/* === NUEVOS ESTILOS: MENÚ OVERLAY === */
+.overlay-menu {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 10, 25, 0.95); /* Fondo oscuro casi opaco */
+    backdrop-filter: blur(15px); /* Efecto vidrio esmerilado */
+    z-index: 9999; /* Por encima de todo */
+    transition: transform 0.8s ease-in-out, opacity 0.8s ease;
+}
+
+.overlay-menu.slide-up {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.menu-container {
+    background: linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    width: 100%;
+    max-width: 600px;
+}
+
+.btn-clinic {
+    background: transparent;
+    border: 1px solid var(--accent-cyan);
+    color: var(--text-white);
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.btn-clinic:hover {
+    background: var(--accent-cyan);
+    color: var(--clinic-blue-deep);
+    box-shadow: 0 0 20px rgba(13, 202, 240, 0.4);
+}
+
+.menu-step {
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- ESTRUCTURA PRINCIPAL --- */
 .app {
     display: flex;
     width: 100vw;
     height: 100vh;
 }
 
-/* --- SECCIÓN DEL VIDEO (INTACTA) --- */
+/* --- SECCIÓN DEL VIDEO --- */
 .player-section {
     position: relative;
     flex: 1; 
     background-color: #000;
     overflow: hidden;
-    transition: all 0.5s ease;
 }
 
 .main-video {
@@ -47,7 +95,6 @@ body, html {
     height: 100%;
     object-fit: cover;
     display: block;
-
     transition: opacity 2s ease-in-out; 
     opacity: 1;
 }
@@ -66,55 +113,27 @@ body, html {
     pointer-events: none;
 }
 
-/* --- BARRA LATERAL (DISEÑO MEJORADO) --- */
+/* --- BARRA LATERAL --- */
 .sidebar-right {
-    /* Nuevo Fondo: Gradiente Azul Clínica */
     background: linear-gradient(160deg, var(--clinic-blue-deep) 0%, var(--clinic-blue-mid) 100%);
-    
-    /* Borde sutil brillante a la izquierda */
     border-left: 1px solid rgba(255,255,255,0.15);
-    
-    /* Sombra más profunda para dar sensación de capa flotante */
     box-shadow: -10px 0 40px rgba(0, 10, 30, 0.6);
-    
     z-index: 10;
     overflow: hidden; 
     white-space: nowrap; 
-
-    /* LÓGICA DE ANIMACIÓN INTACTA (90s) */
     animation: pushCycle 90s infinite ease-in-out;
-    
-    /* Flexbox vertical para organizar los elementos dentro de la barra */
     display: flex;
     flex-direction: column;
-    justify-content: space-between; /* Distribuye espacio arriba y abajo */
+    justify-content: space-between;
 }
 
-/* --- KEYFRAMES (INTACTOS) --- */
 @keyframes pushCycle {
-    0% { 
-        width: 0; min-width: 0; opacity: 0; 
-        padding-left: 0; padding-right: 0; border-left: 0px solid transparent;
-    }
-    2% { 
-        width: var(--sidebar-width); min-width: 300px; opacity: 1; 
-        border-left: 1px solid rgba(255,255,255,0.1);
-    }
-    33% { 
-        width: var(--sidebar-width); min-width: 300px; opacity: 1; 
-        border-left: 1px solid rgba(255,255,255,0.1);
-    }
-    35% { 
-        width: 0; min-width: 0; opacity: 0; 
-        padding-left: 0; padding-right: 0; border-left: 0px solid transparent;
-    }
-    100% { 
-        width: 0; min-width: 0; opacity: 0; 
-        padding-left: 0; padding-right: 0; border-left: 0px solid transparent;
-    }
+    0% { width: 0; min-width: 0; opacity: 0; border-left: 0; }
+    2% { width: var(--sidebar-width); min-width: 300px; opacity: 1; border-left: 1px solid rgba(255,255,255,0.1); }
+    33% { width: var(--sidebar-width); min-width: 300px; opacity: 1; border-left: 1px solid rgba(255,255,255,0.1); }
+    35% { width: 0; min-width: 0; opacity: 0; border-left: 0; }
+    100% { width: 0; min-width: 0; opacity: 0; border-left: 0; }
 }
-
-
 
 /* 1. HEADER / MARCA */
 .brand-name {
@@ -132,7 +151,7 @@ body, html {
     color: var(--accent-cyan); 
 }
 
-/* 2. RELOJ (EL PROTAGONISTA) */
+/* 2. RELOJ */
 .time-container {
     padding: 0 var(--padding-std);
     text-align: center;
@@ -141,8 +160,8 @@ body, html {
 
 .time-display {
     font-family: 'Montserrat', sans-serif;
-    font-size: 5rem; /* Más grande */
-    font-weight: 300; /* Fuente fina (Thin) se ve muy moderna en pantallas grandes */
+    font-size: 5rem;
+    font-weight: 300;
     line-height: 1;
     color: var(--text-white);
     letter-spacing: -2px;
@@ -156,19 +175,15 @@ body, html {
     letter-spacing: 3px;
     font-weight: 600;
     margin-top: 10px;
-
-    text-shadow: 
-        0 0 15px rgba(13, 202, 240, 0.5),
-        0 0 30px rgba(13, 202, 240, 0.2);
+    text-shadow: 0 0 15px rgba(13, 202, 240, 0.5);
 }
 
-/* 3. CLIMA (Estilo Tarjeta / Widget) */
+/* 3. CLIMA */
 .weather-section {
     margin: var(--padding-std);
     padding: 25px;
-    /* Fondo semitransparente (Glass effect) */
     background: rgba(255, 255, 255, 0.05);
-    border-radius: 20px; /* Bordes redondeados modernos */
+    border-radius: 20px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     flex-direction: column;
@@ -197,7 +212,6 @@ body, html {
     margin-top: 5px;
 }
 
-/* Ajustes para Pantallas 4K */
 @media (min-width: 2000px) {
     :root { --sidebar-width: 500px; }
     .time-display { font-size: 7rem; }
