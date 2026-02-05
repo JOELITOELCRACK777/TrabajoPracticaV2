@@ -1,8 +1,6 @@
-/* 1. IMPORTAMOS LA NUEVA FUENTE (Montserrat) */
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;800&display=swap');
 
 :root {
-    /* PALETA CLÍNICA MODERNA */
     --clinic-blue-deep: #00264d;
     --clinic-blue-mid: #005b96;
     --accent-cyan: #0dcaf0;
@@ -23,16 +21,16 @@ body, html {
     color: var(--text-white);
 }
 
-
+/* --- MENÚ --- */
 .overlay-menu {
     position: absolute;
     top: 0;
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 10, 25, 0.95); /* Fondo oscuro casi opaco */
-    backdrop-filter: blur(15px); /* Efecto vidrio esmerilado */
-    z-index: 9999; /* Por encima de todo */
+    background: rgba(0, 10, 25, 0.95);
+    backdrop-filter: blur(15px);
+    z-index: 9999;
     transition: transform 0.8s ease-in-out, opacity 0.8s ease;
 }
 
@@ -75,19 +73,21 @@ body, html {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* --- ESTRUCTURA PRINCIPAL --- */
+/* --- ESTRUCTURA APP --- */
 .app {
     display: flex;
     width: 100vw;
     height: 100vh;
 }
 
-/* --- SECCIÓN DEL VIDEO --- */
 .player-section {
     position: relative;
     flex: 1; 
     background-color: #000;
     overflow: hidden;
+    display: flex; /* Centrar video si el ratio es distinto */
+    justify-content: center;
+    align-items: center;
 }
 
 .main-video {
@@ -95,7 +95,7 @@ body, html {
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: opacity 2s ease-in-out; 
+    transition: opacity 1s ease-in-out; 
     opacity: 1;
 }
 
@@ -113,7 +113,7 @@ body, html {
     pointer-events: none;
 }
 
-/* --- BARRA LATERAL --- */
+/* --- SIDEBAR RESTAURADO --- */
 .sidebar-right {
     background: linear-gradient(160deg, var(--clinic-blue-deep) 0%, var(--clinic-blue-mid) 100%);
     border-left: 1px solid rgba(255,255,255,0.15);
@@ -121,10 +121,14 @@ body, html {
     z-index: 10;
     overflow: hidden; 
     white-space: nowrap; 
-    animation: pushCycle 90s infinite ease-in-out;
+    width: var(--sidebar-width); /* Ancho fijo por defecto */
+    min-width: 300px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    
+    /* Animación original de aparecer/desaparecer (Cycle) */
+    animation: pushCycle 90s infinite ease-in-out;
 }
 
 @keyframes pushCycle {
@@ -135,24 +139,13 @@ body, html {
     100% { width: 0; min-width: 0; opacity: 0; border-left: 0; }
 }
 
-/* 1. HEADER / MARCA */
-.brand-name {
-    font-weight: 800;
-    font-size: 1.8rem;
-    text-transform: uppercase; 
-    letter-spacing: 2px;
-    color: var(--text-white);
+/* LOGO */
+.brand-section {
     padding: var(--padding-std);
-    border-bottom: 1px solid rgba(255,255,255,0.1); 
-    margin-bottom: auto; 
 }
 
-.brand-name span { 
-    color: var(--accent-cyan); 
-}
-
-/* 2. RELOJ */
-.time-container {
+/* TIEMPO */
+.time-container, .time-section {
     padding: 0 var(--padding-std);
     text-align: center;
     margin-bottom: 20px;
@@ -178,7 +171,7 @@ body, html {
     text-shadow: 0 0 15px rgba(13, 202, 240, 0.5);
 }
 
-/* 3. CLIMA */
+/* CLIMA */
 .weather-section {
     margin: var(--padding-std);
     padding: 25px;
@@ -212,9 +205,14 @@ body, html {
     margin-top: 5px;
 }
 
+.x-small-text {
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+}
+
+/* Ajustes pantallas gigantes */
 @media (min-width: 2000px) {
     :root { --sidebar-width: 500px; }
     .time-display { font-size: 7rem; }
-    .brand-name { font-size: 2.5rem; }
     #temperatura { font-size: 4rem; }
 }

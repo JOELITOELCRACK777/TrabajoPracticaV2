@@ -1,10 +1,32 @@
-// --- CLASE 1: GESTOR DE MENÚ DE CLÍNICA (Sin cambios, funciona bien) ---
+// ==========================================
+// 1. CONFIGURACIÓN DEL SISTEMA
+// ==========================================
+const CONFIG = {
+    // 🔑 TU API KEY (Debe estar habilitada para Google Drive API)
+    apiKey: 'AIzaSyA4zAEI5Y4HR5N00DYuZp4vr5FfnXI_LDI', 
+
+    // 🔑 TU CLIENT ID
+    clientId: '994191676825-fohd1rt8hfrq7ff1b2u2jr8pj8jhafca.apps.googleusercontent.com',
+
+    // 📂 ID DE LA CARPETA MAESTRA
+    masterFolderId: '1p1kQo3-Yu4NuII1DDCZlN2HGEy_VUaxH' 
+};
+
+// ==========================================
+// 2. GESTOR DE CLÍNICAS (MENÚ E INTERFAZ)
+// ==========================================
 class ClinicManager {
     constructor(playerInstance) {
         this.player = playerInstance;
-        this.selectedClinic = null;
+        
+        // Estado
+        this.selectedClinicName = null;
+        this.selectedFolderId = null;
+        this.accessToken = null;
+        this.tokenClient = null;
 
-        // Elementos del DOM
+        // Referencias al DOM
+        this.containerClinics = document.getElementById('clinics-container');
         this.menuOverlay = document.getElementById('clinic-menu');
         this.stepSelect = document.getElementById('step-select');
         this.stepDecision = document.getElementById('step-decision');
@@ -12,355 +34,260 @@ class ClinicManager {
         this.stepCode = document.getElementById('step-code');
         this.clinicTitle = document.getElementById('clinic-title-display');
         this.codeInput = document.getElementById('admin-code');
+
+        // Inicializar
+        this.initGoogleAuth(); // Intentamos conectar con Google
+        this.loadClinicsFromDrive(); // Cargamos las clínicas
     }
 
-    showStep(elementId) {
-        [this.stepSelect, this.stepDecision, this.stepAdd, this.stepCode].forEach(el => el.classList.add('d-none'));
-        document.getElementById(elementId).classList.remove('d-none');
+    // --- A. AUTENTICACIÓN GOOGLE (A PRUEBA DE FALLOS) ---
+    initGoogleAuth() {
+        if (window.google && window.google.accounts) {
+            try {
+                this.tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CONFIG.clientId,
+                    scope: 'https://www.googleapis.com/auth/drive.file',
+                    callback: (tokenResponse) => {
+                        if (tokenResponse && tokenResponse.access_token) {
+                            console.log("🔑 Acceso concedido");
+                            this.accessToken = tokenResponse.access_token;
+                            // Si había una tarea pendiente, la ejecutamos
+                            if (this.pendingAction) {
+                                this.pendingAction();
+                                this.pendingAction = null;
+                            }
+                        }
+                    },
+                });
+                console.log("✅ Sistema de Login Google: LISTO");
+            } catch (error) {
+                console.error("⚠️ Error iniciando Google Auth:", error);
+            }
+        } else {
+            console.log("⏳ Esperando librería de Google...");
+            // Reintentar en 1 segundo si no ha cargado
+            setTimeout(() => this.initGoogleAuth(), 1000);
+        }
     }
 
-    selectClinic(name) {
-        this.selectedClinic = name;
-        this.clinicTitle.innerText = name;
+    // --- B. ESCANEO DE CARPETAS ---
+    async loadClinicsFromDrive() {
+        console.log("📡 Escaneando sistema en Drive...");
+        try {
+            const q = `'${CONFIG.masterFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&key=${CONFIG.apiKey}`;
+
+            const response = await fetch(url);
+            
+            // Si la respuesta es 403, es error de permisos
+            if (response.status === 403) {
+                console.error("⛔ Error 403: La API Key no tiene permisos o la carpeta no es pública.");
+                if (this.containerClinics) this.containerClinics.innerHTML = '<p class="text-danger">Error de permisos (403). Revisa la API Key.</p>';
+                return;
+            }
+
+            const data = await response.json();
+
+            if (this.containerClinics) this.containerClinics.innerHTML = '';
+
+            if (!data.files || data.files.length === 0) {
+                if (this.containerClinics) this.containerClinics.innerHTML = '<p class="text-white">No se encontraron clínicas.</p>';
+                return;
+            }
+
+            // Crear botones
+            data.files.forEach(folder => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-clinic btn-lg mb-3 w-100 animate-fade-in';
+                btn.innerText = folder.name;
+                btn.onclick = () => this.selectClinic(folder.name, folder.id);
+                this.containerClinics.appendChild(btn);
+            });
+
+        } catch (error) {
+            console.error("Error cargando clínicas:", error);
+        }
+    }
+
+    // --- C. NAVEGACIÓN ---
+    selectClinic(name, id) {
+        this.selectedClinicName = name;
+        this.selectedFolderId = id;
+        if (this.clinicTitle) this.clinicTitle.innerText = name;
         this.showStep('step-decision');
     }
 
-    askModify() {
-        this.showStep('step-add-content');
+    showStep(elementId) {
+        [this.stepSelect, this.stepDecision, this.stepAdd, this.stepCode].forEach(el => {
+            if (el) el.classList.add('d-none');
+        });
+        const target = document.getElementById(elementId);
+        if (target) target.classList.remove('d-none');
     }
 
-    showCodeInput() {
-        this.showStep('step-code');
-    }
-
+    askModify() { this.showStep('step-add-content'); }
+    showCodeInput() { this.showStep('step-code'); }
+    
     reset() {
-        this.selectedClinic = null;
-        this.codeInput.value = '';
+        this.selectedClinicName = null;
+        this.selectedFolderId = null;
+        if(this.codeInput) this.codeInput.value = '';
         this.showStep('step-select');
     }
 
     activatePlaylist() {
-        console.log(`✅ Activando playlist para: ${this.selectedClinic}`);
         this.menuOverlay.classList.add('slide-up');
-        this.player.init();
+        this.player.init(this.selectedFolderId);
     }
 
+    // --- D. PROCESAR CÓDIGO (¡AQUÍ ESTABA EL ERROR!) ---
     async processCode() {
-        const rawInput = this.codeInput.value.toUpperCase().trim(); 
-        
-        if (!rawInput) { 
-            alert("⚠️ Por favor escribe los datos.\nFormato: AREA, NUMERO, PRIORIDAD\nEjemplo: M, 43, A"); 
-            return; 
-        }
+        const rawInput = this.codeInput.value.toUpperCase().trim();
+        if (!rawInput) return alert("⚠️ Escribe el código. Ej: M, 12, A");
         
         const parts = rawInput.split(',').map(s => s.trim());
-
-        if (parts.length !== 3) { 
-            alert("⚠️ Formato incorrecto.\nDebe ser: AREA, NUMERO, PRIORIDAD\nEjemplo: M, 101, A"); 
-            return; 
-        }
+        if (parts.length !== 3) return alert("⚠️ Formato incorrecto. Ej: M, 12, A");
         
-        const [area, numero, prioridad] = parts;
+        const [tema, numero, prioridad] = parts;
+        const dynamicPrefix = (this.selectedClinicName || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const folderName = `${dynamicPrefix}${tema}${numero}${prioridad}`;
 
-        if (!['A', 'M', 'B'].includes(prioridad)) { 
-            alert("⚠️ La prioridad debe ser A (Alta), M (Media) o B (Baja)."); 
-            return; 
+        // 🛡️ SOLUCIÓN AL ERROR DE LA FOTO 2
+        // Si tokenClient es null, significa que Google no cargó. Reintentamos forzosamente.
+        if (!this.tokenClient) {
+            console.warn("⚠️ Google Login no estaba listo. Reintentando inicializar...");
+            this.initGoogleAuth();
+            
+            // Si sigue sin estar listo, mostramos alerta al usuario
+            if (!this.tokenClient) {
+                alert("⏳ El sistema de seguridad de Google está cargando. Por favor espera 2 segundos y vuelve a intentar.");
+                return;
+            }
         }
 
-        let prefix = 'GEN'; 
-        if (this.selectedClinic === 'Clínica San José') prefix = 'CSJ'; // Ajusta según tus nombres reales del HTML
-        else if (this.selectedClinic === 'Clínica del Norte') prefix = 'CDN';
-        
-        const folderCode = `${prefix}${area}${numero}${prioridad}`;
-        console.log(`📡 Solicitando carpeta: ${folderCode}`);
+        if (!this.accessToken) {
+            this.pendingAction = () => this.runDriveLogic(folderName);
+            // Esto abrirá el popup de login
+            this.tokenClient.requestAccessToken();
+        } else {
+            this.runDriveLogic(folderName);
+        }
+    }
+
+    async runDriveLogic(folderName) {
+        const btn = document.getElementById('btn-process-code');
+        const originalText = btn ? btn.innerText : 'Procesando';
+        if (btn) { btn.innerText = "⏳ Creando..."; btn.disabled = true; }
 
         const newTab = window.open('', '_blank');
-        if (newTab) {
-            newTab.document.write(`<html><head><title>Procesando...</title><style>body{background:#121212;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;text-align:center}.loader{border:4px solid #333;border-top:4px solid #0dcaf0;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin-bottom:20px}@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style></head><body><div class="loader"></div><h2>Conectando...</h2><p>Gestionando <strong>${folderCode}</strong></p></body></html>`);
-        }
-
-        const btn = document.querySelector('#step-code button');
-        const originalText = btn.innerText;
-        btn.innerText = "⏳ Gestionando...";
-        btn.disabled = true;
+        if (newTab) newTab.document.write('<h1 style="font-family:sans-serif;text-align:center;margin-top:20%">Conectando con Drive...</h1>');
 
         try {
-            const webhookUrl = 'https://hook.us2.make.com/hbr2lcucdxpbu0iphqyab09cqqfmzvyy'; 
-
-            const response = await fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    folderName: folderCode,
-                    clinicTag: this.selectedClinic || 'GEN'
-                })
+            // 1. Buscar si existe
+            const q = `name = '${folderName}' and '${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+            const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,webViewLink)`;
+            
+            const searchRes = await fetch(searchUrl, { 
+                headers: { 'Authorization': `Bearer ${this.accessToken}` } 
             });
+            const searchData = await searchRes.json();
 
-            const textResponse = await response.text();
-            let data;
-            try { data = JSON.parse(textResponse); } catch (e) { if(response.ok) { if(newTab) newTab.close(); this.showStep('step-decision'); return; } throw new Error("Error servidor"); }
+            let targetLink = null;
+            let status = 'created';
 
-           if (data && data.driveLink) {
-                
-                // 1. Preparamos el diseño (Verde por defecto = Nueva)
-                let color = "#4caf50"; 
-                let symbol = "✓";
-                let titulo = "✅ Carpeta Creada";
-                let desc = "Redirigiendo a Google Drive...";
-
-                // 2. Si Make nos dice que ya existía (Amarillo)
-                if (data.status === 'exists') {
-                    color = "#ffc107"; 
-                    symbol = "!";
-                    titulo = "⚠️ Carpeta Encontrada";
-                    desc = "Ya existía. Abriendo carpeta...";
-                }
-
-                // 3. Pintamos el HTML en la pestaña que abrimos antes
-                if (newTab) {
-                    newTab.document.body.innerHTML = `
-                        <h1 style='color:${color}; font-size:4rem; margin-bottom:0;'>${symbol}</h1>
-                        <h2 style='color:${color}; margin-top:10px;'>${titulo}</h2>
-                        <p style='font-size: 1.2rem; font-family: sans-serif; color: #ddd;'>${desc}</p>
-                        <div style='margin-top:20px; border-top:1px solid #333; paddingTop:10px; color:#666;'>
-                            <small>Espera unos segundos...</small>
-                        </div>
-                    `;
-
-                    // 4. Esperamos 2 segundos para que se lea el mensaje y REDIRIGIMOS
-                    setTimeout(() => {
-                        newTab.location.href = data.driveLink;
-                    }, 2000);
-                }
-
-                this.showStep('step-decision');
-
+            if (searchData.files && searchData.files.length > 0) {
+                status = 'exists';
+                targetLink = searchData.files[0].webViewLink;
             } else {
-                // Caso de error: Make respondió pero sin link
-                if (newTab) newTab.document.body.innerHTML = "<h2 style='color:orange'>⚠️ Sin Link</h2><p>Carpeta procesada pero no se recibió enlace.</p>";
-                this.showStep('step-decision');
+                // 2. Crear carpeta
+                const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: folderName,
+                        mimeType: 'application/vnd.google-apps.folder',
+                        parents: [this.selectedFolderId]
+                    })
+                });
+                const createData = await createRes.json();
+                targetLink = createData.webViewLink;
             }
 
+            if (newTab && targetLink) {
+                const color = status === 'created' ? '#28a745' : '#ffc107';
+                const title = status === 'created' ? '✅ CARPETA CREADA' : '⚠️ CARPETA EXISTENTE';
+                newTab.document.body.innerHTML = `
+                    <div style="background:${color};height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;color:white;">
+                        <h1 style="font-size:3rem;">${title}</h1>
+                        <h2>${folderName}</h2>
+                        <p>Abriendo en Google Drive...</p>
+                    </div>`;
+                setTimeout(() => newTab.location.href = targetLink, 2000);
+            }
+
+            if (this.codeInput) this.codeInput.value = '';
+            this.showStep('step-decision');
+
         } catch (error) {
-            console.error("❌ Error:", error);
-            if (newTab) newTab.document.body.innerHTML = `<h2 style='color:red'>Error</h2><p>${error.message}</p>`;
+            console.error(error);
+            if (newTab) newTab.close();
+            alert("Error: " + error.message);
         } finally {
-            btn.innerText = originalText;
-            btn.disabled = false;
+            if (btn) { btn.innerText = originalText; btn.disabled = false; }
         }
     }
 }
 
-
-// --- CLASE 2: REPRODUCTOR INTELIGENTE (RADIO LOGIC) ---
-class TVIPlayer {
+// ==========================================
+// 3. REPRODUCTOR Y UTILIDADES
+// ==========================================
+class VideoPlayer {
     constructor() {
-        // --- CONFIGURACIÓN ---
-        this.cloudName = 'dpgpfeadd';     
-        this.tagName = 'modo_tv';   
-
         this.videoElement = document.getElementById('main-player');
-        
-        // CUBETAS DE CONTENIDO
-        this.buckets = {
-            A: [], // Alta Prioridad
-            M: [], // Media Prioridad
-            B: []  // Baja / Relleno (Cola normal)
-        };
-
-        // TIMERS (Marcas de tiempo de la última vez que se reprodujo)
-        this.lastTimeA = 0; 
-        this.lastTimeM = 0; 
-
-        // TIEMPOS DE REGLA (AJUSTADOS) ---
-        this.INTERVAL_A = 5 * 60 * 1000;  // 5 Minutos
-        this.INTERVAL_M = 8 * 60 * 1000;  // 8 Minutos
-
-        this.isFading = false;
-
-        // MEMORIA (Para no repetir videos seguidos) ---
-        this.lastPlayedUrl = null; 
-        
-        // Binds
-        this.handleVideoEnd = this.handleVideoEnd.bind(this);
-        this.checkFadeOut = this.checkFadeOut.bind(this);
-
-        // Eventos
-        this.videoElement.onended = this.handleVideoEnd;
-        this.videoElement.ontimeupdate = this.checkFadeOut;
-        this.videoElement.onerror = () => {
-            console.warn("⚠️ Error en video, saltando...");
-            this.handleVideoEnd(); 
-        };
-    }
-
-    async init() {
-        console.log("🚀 Iniciando Motor TV...");
-        this.videoElement.classList.add('video-fade-out');
-        
-        await this.loadPlaylist();
-        
-        // Primera reproducción
-        this.playNextAlgorithm();
-    }
-
-    checkFadeOut() {
-        if (!this.videoElement.duration || this.isFading) return;
-        const timeLeft = this.videoElement.duration - this.videoElement.currentTime;
-        if (timeLeft < 2.5) {
-            this.isFading = true;
-            this.videoElement.classList.add('video-fade-out');
+        this.rootFolderId = null;
+        if (this.videoElement) {
+            this.videoElement.onended = () => this.playNextCycle();
+            this.videoElement.onerror = () => setTimeout(() => this.playNextCycle(), 2000);
         }
     }
 
-    async loadPlaylist() {
-        console.log("🔄 Descargando y clasificando contenido...");
-        const listUrl = `https://res.cloudinary.com/${this.cloudName}/video/list/${this.tagName}.json?t=${Date.now()}`;
+    init(folderId) {
+        this.rootFolderId = folderId;
+        this.playNextCycle();
+    }
 
+    async playNextCycle() {
         try {
-            const response = await fetch(listUrl);
-            if (!response.ok) throw new Error("Fallo fetch Cloudinary");
-            const data = await response.json();
+            if(this.videoElement) this.videoElement.classList.add('video-fade-out');
             
-            // LIMPIAR
-            this.buckets.A = [];
-            this.buckets.M = [];
-            this.buckets.B = [];
+            const q = `'${this.rootFolderId}' in parents and mimeType contains 'video/' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id)`;
+            const res = await fetch(url);
+            const data = await res.json();
 
-            // CLASIFICACIÓN INTELIGENTE
-            data.resources.forEach(video => {
-                const url = `https://res.cloudinary.com/${this.cloudName}/video/upload/q_auto/v${video.version}/${encodeURIComponent(video.public_id)}.mp4`;
-                
-                // Limpieza de nombre y detección de última letra
-                const cleanName = video.public_id.split('/').pop().toUpperCase();
-                const lastChar = cleanName.slice(-1); 
-
-                if (lastChar === 'A') {
-                    this.buckets.A.push(url);
-                } else if (lastChar === 'M') {
-                    this.buckets.M.push(url);
-                } else {
-                    this.buckets.B.push(url);
-                }
-            });
-
-            console.group("📊 Playlist Cargada");
-            console.log(`🔴 Alta (A): ${this.buckets.A.length}`);
-            console.log(`🟡 Media (M): ${this.buckets.M.length}`);
-            console.log(`🟢 Baja (B): ${this.buckets.B.length}`);
-            console.groupEnd();
-
-        } catch (error) {
-            console.error("❌ Error cargando playlist:", error);
-            setTimeout(() => this.loadPlaylist(), 10000);
-        }
-    }
-
-    // --- ALGORITMO DE SELECCIÓN ---
-    playNextAlgorithm() {
-        const now = Date.now();
-        let selectedUrl = null;
-        let selectedType = '';
-
-        const timeSinceA = now - this.lastTimeA;
-        const timeSinceM = now - this.lastTimeM;
-
-        // 1. PRIORIDAD ALTA (A)
-        if (this.buckets.A.length > 0 && (this.lastTimeA !== 0 && timeSinceA >= this.INTERVAL_A)) {
-            selectedUrl = this.getRandomVideo(this.buckets.A);
-            this.lastTimeA = now; 
-            selectedType = '🔴 ALTA (A)';
-        } 
-        // 2. PRIORIDAD MEDIA (M)
-        else if (this.buckets.M.length > 0 && (this.lastTimeM !== 0 && timeSinceM >= this.INTERVAL_M)) {
-            selectedUrl = this.getRandomVideo(this.buckets.M);
-            this.lastTimeM = now; 
-            selectedType = '🟡 MEDIA (M)';
-        } 
-        // 3. COLA NORMAL (B)
-        else if (this.buckets.B.length > 0) {
-            selectedUrl = this.getRandomVideo(this.buckets.B);
-            selectedType = '🟢 BAJA (B)';
-            
-            if(this.lastTimeA === 0) this.lastTimeA = now; 
-            if(this.lastTimeM === 0) this.lastTimeM = now;
-        }
-        // 4. FALLBACK (Si no hay B, usar lo que haya)
-        else {
-            if (this.buckets.A.length > 0) {
-                 selectedUrl = this.getRandomVideo(this.buckets.A);
-                 selectedType = '🔴 ALTA (Fallback)';
-            } else if (this.buckets.M.length > 0) {
-                 selectedUrl = this.getRandomVideo(this.buckets.M);
-                 selectedType = '🟡 MEDIA (Fallback)';
+            if (data.files && data.files.length > 0) {
+                const video = data.files[Math.floor(Math.random() * data.files.length)];
+                this.videoElement.src = `https://drive.google.com/uc?export=download&id=${video.id}`;
+                await this.videoElement.play();
+                this.videoElement.classList.remove('video-fade-out');
+            } else {
+                // Si no hay videos, reintentamos en 5s
+                setTimeout(() => this.playNextCycle(), 5000);
             }
+        } catch (error) {
+            console.error("Error reproductor:", error);
+            setTimeout(() => this.playNextCycle(), 5000);
         }
-
-        if (selectedUrl) {
-            console.log(`▶ Reproduciendo: ${selectedType} | ${selectedUrl.split('/').pop()}`);
-            this.playVideoFile(selectedUrl);
-        } else {
-            console.warn("⚠️ ALERTA: No hay videos disponibles.");
-            setTimeout(() => this.playNextAlgorithm(), 5000);
-        }
-    }
-
-    // --- 🎲 SELECCIÓN ALEATORIA SIN REPETICIÓN ---
-    getRandomVideo(array) {
-        if (!array || array.length === 0) return null;
-        
-        // Si solo hay 1 video, no queda otra que repetir
-        if (array.length === 1) return array[0];
-
-        let selected;
-        // Intentar buscar uno nuevo hasta que sea diferente al anterior
-        // (Máximo de intentos implícito por estadística, pero seguro con >1 video)
-        do {
-            const randomIndex = Math.floor(Math.random() * array.length);
-            selected = array[randomIndex];
-        } while (selected === this.lastPlayedUrl);
-
-        return selected;
-    }
-
-    playVideoFile(url) {
-        // Guardamos este video en la memoria para no repetir el mismo inmediatamente
-        this.lastPlayedUrl = url;
-
-        this.videoElement.classList.add('video-fade-out');
-        this.isFading = false;
-        this.videoElement.src = url;
-
-        const playPromise = this.videoElement.play();
-        if (playPromise !== undefined) {
-            playPromise.then(() => {
-                setTimeout(() => {
-                    this.videoElement.classList.remove('video-fade-out');
-                }, 100);
-            }).catch(e => {
-                console.error("Autoplay error:", e);
-                setTimeout(() => this.handleVideoEnd(), 2000);
-            });
-        }
-    }
-
-    handleVideoEnd() {
-        console.log("⏹️ Video terminado.");
-        this.videoElement.classList.add('video-fade-out');
-        this.isFading = true;
-
-        setTimeout(() => {
-            this.playNextAlgorithm();
-        }, 1500); 
     }
 }
 
-// --- UTILIDADES ---
 function updateClock() {
     const now = new Date();
     const timeEl = document.getElementById('hora');
     const dateEl = document.getElementById('fecha');
-    
     if(timeEl) timeEl.innerText = now.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
     if(dateEl) dateEl.innerText = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace('.', '').toUpperCase();
 }
@@ -376,14 +303,8 @@ async function updateWeather() {
     } catch (e) { console.error("Clima off"); }
 }
 
-// --- ARRANQUE ---
-const player = new TVIPlayer();
-const clinicManager = new ClinicManager(player);
-window.clinicManager = clinicManager; // Exponer al HTML
-
-window.addEventListener('DOMContentLoaded', () => {
-    updateClock();
-    setInterval(updateClock, 1000);
-    updateWeather();
-    setInterval(updateWeather, 1800000); // 30 min
+document.addEventListener('DOMContentLoaded', () => {
+    updateClock(); setInterval(updateClock, 1000);
+    updateWeather(); setInterval(updateWeather, 1800000);
+    window.clinicManager = new ClinicManager(new VideoPlayer()); 
 });
