@@ -15,67 +15,90 @@
     <section id="clinic-menu" class="overlay-menu d-flex align-items-center justify-content-center">
         <div class="menu-container text-center p-5">
             
-            <div id="step-select" class="menu-step active">
-                <h1 class="mb-4">Bienvenido al Sistema Multimedia</h1>
-                <p class="mb-4 text-white-50">Cargando clínicas desde Google Drive...</p>
-                <div id="clinics-container" class="d-grid gap-3 col-8 mx-auto">
+    <div id="step-select" class="menu-step active">
+        <h1 class="mb-4">Bienvenido al Sistema Multimedia</h1>
+        <p class="mb-4 text-white-50">Cargando clínicas desde Google Drive...</p>
+        <div id="clinics-container" class="d-grid gap-3 col-8 mx-auto">
+            </div>
+    </div>
+
+    <div id="step-decision" class="menu-step d-none">
+        <h2 id="clinic-title-display" class="mb-4">Clínica Seleccionada</h2>
+        <div class="d-grid gap-3 col-8 mx-auto">
+            <button class="btn btn-success btn-lg py-3" onclick="clinicManager.activatePlaylist()">
+                ▶ ACTIVAR PLAYLIST
+            </button>
+            <button class="btn btn-outline-light btn-lg" onclick="clinicManager.loadDashboard()">
+                ⚙️ GESTIONAR CARPETAS
+            </button>
+        </div>
+        <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Volver</button>
+    </div>
+
+    <div id="step-dashboard" class="menu-step d-none" style="text-align: left;">
+        
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="m-0 text-white"><span style="color:var(--accent-cyan)">✚</span> GESTIÓN DE CONTENIDOS</h5>
+            <button class="btn btn-sm btn-outline-light" onclick="clinicManager.backToDecision()">Cerrar ✕</button>
+        </div>
+
+        <div class="creation-panel p-3 mb-3">
+            <h6 class="text-white-50 mb-3" style="font-size: 0.8rem;">CREAR NUEVA CARPETA</h6>
+            
+            <div class="row g-2 align-items-end">
+                <div class="col-5">
+                    <label class="small text-muted mb-1">Especialidad</label>
+                    <select id="new-topic" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="clinicManager.updatePreview()">
+                        <option value="GEN">GENERAL</option>
+                        <option value="CARD">CARDIOLOGÍA</option>
+                        <option value="PED">PEDIATRÍA</option>
+                        <option value="URG">URGENCIAS</option>
+                        <option value="TRA">TRAUMATOLOGÍA</option>
+                        <option value="ODO">ODONTOLOGÍA</option>
+                        <option value="TUR">TURISMO</option>
+                        <option value="CORP">CORPORATIVO</option>
+                    </select>
+                </div>
+
+                <div class="col-3">
+                    <label class="small text-muted mb-1">ID #</label>
+                    <input type="number" id="new-id" class="form-control form-control-sm bg-dark text-white border-secondary text-center" value="1" min="1" oninput="clinicManager.updatePreview()">
+                </div>
+
+                <div class="col-4">
+                    <label class="small text-muted mb-1">Prioridad</label>
+                    <div class="btn-group w-100" role="group">
+                        <input type="radio" class="btn-check" name="intensity-btn" id="int-a" value="A" onchange="clinicManager.updatePreview()">
+                        <label class="btn btn-outline-danger btn-sm" for="int-a" title="Alta">A</label>
+
+                        <input type="radio" class="btn-check" name="intensity-btn" id="int-m" value="M" checked onchange="clinicManager.updatePreview()">
+                        <label class="btn btn-outline-warning btn-sm" for="int-m" title="Media">M</label>
+
+                        <input type="radio" class="btn-check" name="intensity-btn" id="int-b" value="B" onchange="clinicManager.updatePreview()">
+                        <label class="btn btn-outline-success btn-sm" for="int-b" title="Baja">B</label>
                     </div>
-            </div>
-
-            <div id="step-decision" class="menu-step d-none">
-                <h2 id="clinic-title-display" class="mb-4">Clínica Seleccionada</h2>
-                <div class="d-grid gap-3 col-8 mx-auto">
-                    <button class="btn btn-success btn-lg py-3" onclick="clinicManager.activatePlaylist()">
-                        ▶ ACTIVAR PLAYLIST
-                    </button>
-                    <button class="btn btn-outline-light btn-lg" onclick="clinicManager.askModify()">
-                        ⚙️ MODIFICAR CONTENIDO
-                    </button>
-                </div>
-                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Volver</button>
-            </div>
-
-            <div id="step-add-content" class="menu-step d-none">
-                <h3 class="mb-4">¿Quieres añadir o Eliminar contenido multimedia?</h3>
-                <div class="d-flex justify-content-center gap-3">
-                    <button class="btn btn-primary btn-lg px-5" onclick="clinicManager.showCodeInput()">SÍ</button>
-                    <button class="btn btn-secondary btn-lg px-5" onclick="clinicManager.backToDecision()">NO</button>
                 </div>
             </div>
 
-            <div id="step-code" class="menu-step d-none" style="position: relative; padding-bottom: 50px;">
-    
-            <h3 class="mb-3">Gestión de Carpetas</h3>
-            <p class="small text-white-50 mb-4">Formato: TEMA, NUMERO, INTENSIDAD:</p>
-            <p class="small text-white-50 mb-4">Alta(A), Media(M) o Baja(B)</p>
-    
-            <input type="text" id="admin-code" class="form-control form-control-lg mb-4 text-center" 
-                placeholder="M,12,A" 
-                style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #444;">
-    
-            <div class="d-grid gap-2 mb-3">
-                <button id="btn-process-code" class="btn btn-info btn-lg text-white fw-bold py-3" 
-                        onclick="clinicManager.processCode()">
-                    📂 IR / CREAR CARPETA
+            <div class="mt-3 d-flex justify-content-between align-items-center bg-black rounded p-2 border border-secondary">
+                <div class="d-flex flex-column px-2">
+                    <span class="text-white-50" style="font-size:0.6rem">CÓDIGO:</span>
+                    <span id="code-preview" class="fw-bold text-info" style="letter-spacing: 1px;">---</span>
+                </div>
+                <button class="btn btn-info btn-sm fw-bold px-3" onclick="clinicManager.createFolderFromUI()">
+                    ✚ CREAR
                 </button>
             </div>
+        </div>
 
-            <button class="btn btn-link text-white-50" onclick="clinicManager.backToDecision()">
-                ← Cancelar
-            </button>
-
-    <button id="btn-delete-folder" 
-            class="btn btn-outline-danger btn-sm" 
-            onclick="clinicManager.deleteFolder()"
-            title="Eliminar esta carpeta"
-            style="position: absolute; bottom: -20px; right: -20px; opacity: 0.8;">
-        ELIMINAR CARPETA 🗑️
-    </button>
+        <div class="flex-grow-1" style="height: 250px; overflow-y: auto;" id="folders-scroll-area">
+            <h6 class="text-white-50 mb-2 sticky-top bg-black py-1" style="font-size: 0.8rem;">CARPETAS ACTIVAS</h6>
+            <div id="folders-list" class="d-grid gap-2">
+                </div>
+        </div>
+    </div>
 
 </div>
-
-
-        </div>
     </section>
 
     <div class="app d-flex">
