@@ -227,3 +227,30 @@ body, html {
     color: rgba(255, 255, 255, 0.5) !important; /* Blanco semi-transparente */
     opacity: 1; /* Necesario para Firefox */
 }
+
+#clinics-container {
+    max-height: 50vh;       /* Altura máxima: 50% de la pantalla */
+    overflow-y: auto;       /* Activa el scroll vertical si se pasa de altura */
+    padding-right: 10px;    /* Espacio para que la barra no tape el texto */
+    margin-bottom: 20px;
+}
+
+/* Diseño de la barra de scroll (Estilo Médico/Dark) */
+#clinics-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+#clinics-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05); /* Fondo sutil */
+    border-radius: 4px;
+}
+
+#clinics-container::-webkit-scrollbar-thumb {
+    background: var(--accent-cyan); /* Tu color cyan corporativo */
+    border-radius: 4px;
+}
+
+#clinics-container::-webkit-scrollbar-thumb:hover {
+    background: #0bb5d8; /* Un poco más oscuro al pasar el mouse */
+}
+
