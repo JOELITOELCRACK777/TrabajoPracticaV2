@@ -157,8 +157,9 @@ body, html {
 }
 
 .time-display {
+    margin-left: -12px;
     font-family: 'Montserrat', sans-serif;
-    font-size: 5rem;
+    font-size: 4rem;
     font-weight: 300;
     line-height: 1;
     color: var(--text-white);
@@ -220,4 +221,9 @@ body, html {
     :root { --sidebar-width: 500px; }
     .time-display { font-size: 7rem; }
     #temperatura { font-size: 4rem; }
+}
+
+#admin-code::placeholder {
+    color: rgba(255, 255, 255, 0.5) !important; /* Blanco semi-transparente */
+    opacity: 1; /* Necesario para Firefox */
 }

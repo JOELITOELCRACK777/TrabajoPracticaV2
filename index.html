@@ -39,22 +39,40 @@
                 <h3 class="mb-4">¿Quieres añadir o Eliminar contenido multimedia?</h3>
                 <div class="d-flex justify-content-center gap-3">
                     <button class="btn btn-primary btn-lg px-5" onclick="clinicManager.showCodeInput()">SÍ</button>
-                    <button class="btn btn-secondary btn-lg px-5" onclick="clinicManager.activatePlaylist()">NO (Solo reproducir)</button>
+                    <button class="btn btn-secondary btn-lg px-5" onclick="clinicManager.backToDecision()">NO</button>
                 </div>
-                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Cancelar</button>
             </div>
 
-            <div id="step-code" class="menu-step d-none">
-                <h3 class="mb-3">Ingrese Código de Gestión</h3>
-                <p class="small text-white-50 mb-4">Formato: SUJETO, NUMERO, INTENSIDAD</p>
-                
-                <input type="text" id="admin-code" class="form-control form-control-lg mb-3 text-center" placeholder="MEDICO, 12, ALTA">
-                
-                <button id="btn-process-code" class="btn btn-info btn-lg w-100 text-white fw-bold" onclick="clinicManager.processCode()">
-                    IR A CARPETA
+            <div id="step-code" class="menu-step d-none" style="position: relative; padding-bottom: 50px;">
+    
+            <h3 class="mb-3">Gestión de Carpetas</h3>
+            <p class="small text-white-50 mb-4">Formato: TEMA, NUMERO, INTENSIDAD:</p>
+            <p class="small text-white-50 mb-4">Alta(A), Media(M) o Baja(B)</p>
+    
+            <input type="text" id="admin-code" class="form-control form-control-lg mb-4 text-center" 
+                placeholder="M,12,A" 
+                style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #444;">
+    
+            <div class="d-grid gap-2 mb-3">
+                <button id="btn-process-code" class="btn btn-info btn-lg text-white fw-bold py-3" 
+                        onclick="clinicManager.processCode()">
+                    📂 IR / CREAR CARPETA
                 </button>
-                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Cancelar</button>
             </div>
+
+            <button class="btn btn-link text-white-50" onclick="clinicManager.backToDecision()">
+                ← Cancelar
+            </button>
+
+    <button id="btn-delete-folder" 
+            class="btn btn-outline-danger btn-sm" 
+            onclick="clinicManager.deleteFolder()"
+            title="Eliminar esta carpeta"
+            style="position: absolute; bottom: -20px; right: -20px; opacity: 0.8;">
+        ELIMINAR CARPETA 🗑️
+    </button>
+
+</div>
 
         </div>
     </section>
@@ -74,6 +92,10 @@
                         <img class="logo-clinica" src="img/logoclinica.png" width="50" height="50" alt="Logo">
                     </div>
                 </div>
+
+                <div style="font-family: 'Montserrat', sans-serif; font-size: 1.1rem; font-weight: 700; color: #ffffff; text-transform: uppercase; letter-spacing: 2px; margin-left: 40px; display: flex; align-items: center; gap: 8px; text-shadow: 0 0 15px rgba(13, 202, 240, 0.4);">
+    <span style="color: #0dcaf0; font-size: 1.2em; line-height: 1;">✚</span> CLÍNICA SAN JOSÉ
+</div>
 
                 <div class="time-section text-center">
                     <div id="hora" class="time-display">00:00</div>

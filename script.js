@@ -85,8 +85,7 @@ class ClinicManager {
             const data = JSON.parse(pending);
             console.log("🔄 Recuperando sesión para:", data.folderName);
 
-            // 1. VITAL: Restauramos los datos de la clínica en la memoria activa
-            // Si no hacemos esto, runDriveLogic no sabrá dónde buscar
+            // 1. Restauramos los datos de la clínica en la memoria activa
             this.selectedFolderId = data.folderId;
             this.selectedClinicName = data.clinicName;
 
@@ -95,11 +94,29 @@ class ClinicManager {
                 this.videoPlayer.resetFlags(); 
             }
 
-            // 3. Borramos la memoria temporal para no repetir la acción al recargar
-            localStorage.removeItem('pending_drive_action');
+            // 3. EN LUGAR DE EJECUTAR AUTOMÁTICAMENTE (que el navegador bloquea),
+            // Preparamos el botón para que des el clic final.
+            const btn = document.getElementById('btn-process-code');
+            if (btn) {
+                // Cambiamos el estilo del botón para indicar que está listo
+                btn.innerText = `🚀 ABRIR CARPETA: ${data.folderName}`;
+                btn.disabled = false;
+                btn.style.backgroundColor = "#28a745"; // Verde Éxito
+                btn.style.color = "white";
+                
+                // Al hacer clic, ejecutamos la lógica de Drive
+                btn.onclick = () => {
+                    this.runDriveLogic(data.folderName);
+                    // Restauramos el comportamiento original del botón para futuros usos
+                    btn.onclick = () => this.processCode();
+                };
+                
+                // Intentamos un click automático por si el navegador es permisivo
+                btn.click();
+            }
 
-            // 4. Ejecutamos la lógica de Drive
-            this.runDriveLogic(data.folderName);
+            // Borramos la memoria temporal una vez preparado el botón
+            localStorage.removeItem('pending_drive_action');
 
         } catch (e) {
             console.error("❌ Error al procesar acción pendiente:", e);
@@ -173,6 +190,15 @@ class ClinicManager {
         this.showStep('step-select');
     }
 
+    backToDecision() {
+    // 1. Limpiamos el input para que esté vacío la próxima vez
+    if(this.codeInput) this.codeInput.value = '';
+    
+    // 2. Volvemos a la pantalla de decisión ("Reproducir" / "Modificar")
+    // NO borramos this.selectedClinicName ni this.selectedFolderId
+    this.showStep('step-decision');
+}
+
     activatePlaylist() {
         this.menuOverlay.classList.add('slide-up');
         this.player.init(this.selectedFolderId);
@@ -220,7 +246,7 @@ class ClinicManager {
 }
 
     async runDriveLogic(folderName) {
-    // 1. Verificación de Seguridad: ¿Tenemos token?
+    // 1. Verificación de Seguridad
     if (!this.accessToken) {
         alert("⚠️ Sesión expirada. Por favor, inicia sesión de nuevo.");
         this.initGoogleAuth();
@@ -228,33 +254,47 @@ class ClinicManager {
     }
 
     const btn = document.getElementById('btn-process-code');
-    const originalText = btn ? btn.innerText : 'Procesando';
+    const originalText = "IR A CARPETA"; 
+    
     if (btn) { btn.innerText = "⏳ Conectando..."; btn.disabled = true; }
 
-    // Preparamos la pestaña con un diseño de carga más profesional
+    // 2. Intentamos abrir la pestaña ANTES de cualquier espera (para evitar bloqueos)
     const newTab = window.open('', '_blank');
-    if (newTab) {
-        newTab.document.write(`
-            <div id="loader" style="height:100vh;display:flex;justify-content:center;align-items:center;font-family:sans-serif;background:#f4f4f4;">
-                <div style="text-align:center;">
-                    <div style="border:8px solid #f3f3f3;border-top:8px solid #3498db;border-radius:50%;width:60px;height:60px;animation:spin 2s linear infinite;margin:0 auto;"></div>
-                    <h2 style="color:#555;">Conectando con Google Drive...</h2>
-                    <p style="color:#888;">Preparando carpeta: ${folderName}</p>
-                </div>
-                <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
-            </div>
-        `);
+
+    // 3. Verificamos si el navegador bloqueó la pestaña
+    if (!newTab || newTab.closed || typeof newTab.closed == 'undefined') {
+        if (btn) {
+            btn.innerText = "⚠️ PESTAÑA BLOQUEADA. HAZ CLICK AQUÍ.";
+            btn.style.backgroundColor = "#ffc107"; // Amarillo Alerta
+            btn.style.color = "black";
+            btn.disabled = false;
+            // Forzamos al usuario a hacer click manual para desbloquear el popup
+            btn.onclick = () => this.runDriveLogic(folderName);
+        }
+        return; // IMPORTANTE: Detenemos todo aquí para no avanzar ni cambiar de pantalla.
     }
 
+    // Si la pestaña abrió, mostramos el loader
+    newTab.document.write(`
+        <div id="loader" style="height:100vh;display:flex;justify-content:center;align-items:center;font-family:sans-serif;background:#f4f4f4;">
+            <div style="text-align:center;">
+                <div style="border:8px solid #f3f3f3;border-top:8px solid #3498db;border-radius:50%;width:60px;height:60px;animation:spin 2s linear infinite;margin:0 auto;"></div>
+                <h2 style="color:#555;">Conectando con Google Drive...</h2>
+                <p style="color:#888;">Preparando carpeta: ${folderName}</p>
+            </div>
+            <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+        </div>
+    `);
+
     try {
-        // 1. Guardar la acción actual como pendiente por si el token falla y necesitamos recargar
+        // Guardamos respaldo por si falla el token durante la petición
         localStorage.setItem('pending_drive_action', JSON.stringify({
             folderName: folderName,
             folderId: this.selectedFolderId,
             clinicName: this.selectedClinicName
         }));
 
-        // 2. Buscar si la carpeta ya existe
+        // 4. Buscar carpeta existente
         const q = `name = '${folderName}' and '${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
         const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,webViewLink)`;
         
@@ -262,13 +302,8 @@ class ClinicManager {
             headers: { 'Authorization': `Bearer ${this.accessToken}` } 
         });
 
-        // --- VALIDACIÓN DE TOKEN ---
-        if (searchRes.status === 401) {
-            throw new Error("UNAUTHORIZED");
-        }
-        // ---------------------------
-        
-        if (!searchRes.ok) throw new Error("Error en la comunicación con Google");
+        if (searchRes.status === 401) throw new Error("UNAUTHORIZED");
+        if (!searchRes.ok) throw new Error("Error comunicación Google");
         
         const searchData = await searchRes.json();
         let targetLink = null;
@@ -277,7 +312,7 @@ class ClinicManager {
         if (searchData.files && searchData.files.length > 0) {
             targetLink = searchData.files[0].webViewLink;
         } else {
-            // 3. Crear carpeta si no existe
+            // 5. Crear carpeta si no existe
             const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
                 method: 'POST',
                 headers: {
@@ -292,44 +327,127 @@ class ClinicManager {
             });
 
             if (createRes.status === 401) throw new Error("UNAUTHORIZED");
-            if (!createRes.ok) throw new Error("Error al crear la carpeta");
+            if (!createRes.ok) throw new Error("Error crear carpeta");
 
             const createData = await createRes.json();
             targetLink = createData.webViewLink;
             isNew = true;
         }
 
-        // 4. Si llegamos aquí, todo salió bien: Borramos la acción pendiente
+        // Todo OK: Borramos pendiente
         localStorage.removeItem('pending_drive_action');
 
-        // 5. Actualizar la pestaña con el resultado
-        if (newTab && targetLink) {
+        // 6. Actualizar pestaña con éxito
+        if (newTab) {
             const color = isNew ? '#28a745' : '#ffc107';
             const title = isNew ? '✅ CARPETA CREADA' : '⚠️ CARPETA ENCONTRADA';
+            const textColor = isNew ? 'white' : 'black';
             
             newTab.document.body.innerHTML = `
-                <div style="background:${color};height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;color:white;transition: all 0.5s;">
+                <div style="background:${color};height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;color:${textColor};transition: all 0.5s;">
                     <h1 style="font-size:3rem;margin-bottom:0;">${title}</h1>
                     <h2 style="font-weight:300;margin-top:10px;">${folderName}</h2>
-                    <p style="background:rgba(0,0,0,0.1);padding:10px 20px;border-radius:20px;">Redirigiendo en segundos...</p>
+                    <p style="background:rgba(0,0,0,0.1);padding:10px 20px;border-radius:20px;">Redirigiendo...</p>
                 </div>`;
             
             setTimeout(() => { newTab.location.href = targetLink; }, 1500);
         }
 
+        // Limpiar input y volver a estado normal
         if (this.codeInput) this.codeInput.value = '';
+        
+        if (btn) { 
+            btn.innerText = originalText; 
+            btn.disabled = false;
+            btn.style.backgroundColor = ""; // Reset color
+            btn.style.color = "";
+            btn.onclick = () => this.processCode(); // Restaurar función original
+        }
+        
         this.showStep('step-decision');
 
     } catch (error) {
-        console.error("❌ Error en Drive Logic:", error);
+        console.error("❌ Error Drive Logic:", error);
+        if (newTab) newTab.close();
         
         if (error.message === "UNAUTHORIZED") {
-        if (newTab) newTab.close();
-        // Ya no hace falta el alert molesto, el botón dirá qué hacer
-        this.handleAuthError(); 
+            this.handleAuthError(); 
         } else {
-            if (newTab) newTab.close();
-            alert("No se pudo conectar con Drive: " + error.message);
+            alert("Error: " + error.message);
+            if (btn) { btn.innerText = originalText; btn.disabled = false; }
+        }
+    }
+}
+
+async deleteFolder() {
+    // 1. Validar Input (Misma lógica que processCode)
+    const rawInput = this.codeInput.value.toUpperCase().trim();
+    if (!rawInput) return alert("⚠️ Escribe el código de la carpeta a eliminar.");
+    
+    const parts = rawInput.split(',').map(s => s.trim());
+    if (parts.length !== 3) return alert("⚠️ Formato incorrecto. Ej: M, 12, A");
+    
+    const [tema, numero, prioridad] = parts;
+    const dynamicPrefix = (this.selectedClinicName || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const folderName = `${dynamicPrefix}${tema}${numero}${prioridad}`;
+
+    // 2. Confirmación de Seguridad (CRÍTICO)
+    const confirmacion = confirm(`¿Estás seguro de que quieres ELIMINAR la carpeta "${folderName}"?\n\nEsta acción moverá la carpeta y sus videos a la Papelera de Google Drive.`);
+    if (!confirmacion) return;
+
+    // 3. Verificar Auth
+    if (!this.accessToken) {
+        alert("⚠️ Sesión expirada. El sistema intentará reconectar...");
+        this.initGoogleAuth();
+        return;
+    }
+
+    // UI Feedback
+    const btn = document.getElementById('btn-delete-folder');
+    const originalText = btn ? btn.innerText : 'Eliminar';
+    if (btn) { btn.innerText = "🗑️ Borrando..."; btn.disabled = true; }
+
+    try {
+        // 4. Buscar ID de la carpeta
+        const q = `name = '${folderName}' and '${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
+        
+        const searchRes = await fetch(searchUrl, { 
+            headers: { 'Authorization': `Bearer ${this.accessToken}` } 
+        });
+        
+        if (searchRes.status === 401) throw new Error("UNAUTHORIZED");
+        const searchData = await searchRes.json();
+
+        if (searchData.files && searchData.files.length > 0) {
+            const fileId = searchData.files[0].id;
+
+            // 5. Mover a la papelera (Método PATCH)
+            const deleteRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ trashed: true }) // Enviamos a la papelera
+            });
+
+            if (deleteRes.ok) {
+                alert(`✅ La carpeta "${folderName}" ha sido eliminada correctamente.`);
+                this.codeInput.value = ''; // Limpiar campo
+            } else {
+                throw new Error("Google Drive rechazó la eliminación.");
+            }
+        } else {
+            alert(`⚠️ No se encontró la carpeta "${folderName}" en esta clínica.`);
+        }
+
+    } catch (error) {
+        console.error("Error al eliminar:", error);
+        if (error.message === "UNAUTHORIZED") {
+            this.handleAuthError();
+        } else {
+            alert("❌ Error: " + error.message);
         }
     } finally {
         if (btn) { btn.innerText = originalText; btn.disabled = false; }
