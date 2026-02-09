@@ -10,6 +10,11 @@
     --padding-std: 30px;
 }
 
+.logo-clinica{
+    float: right;
+    margin-top: -50px;
+}
+
 body, html {
     margin: 0;
     padding: 0;

@@ -42,33 +42,71 @@ class ClinicManager {
 
     // --- A. AUTENTICACIÓN GOOGLE (A PRUEBA DE FALLOS) ---
     initGoogleAuth() {
-        if (window.google && window.google.accounts) {
-            try {
-                this.tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CONFIG.clientId,
-                    scope: 'https://www.googleapis.com/auth/drive.file',
-                    callback: (tokenResponse) => {
-                        if (tokenResponse && tokenResponse.access_token) {
-                            console.log("🔑 Acceso concedido");
-                            this.accessToken = tokenResponse.access_token;
-                            // Si había una tarea pendiente, la ejecutamos
-                            if (this.pendingAction) {
-                                this.pendingAction();
-                                this.pendingAction = null;
-                            }
-                        }
-                    },
-                });
-                console.log("✅ Sistema de Login Google: LISTO");
-            } catch (error) {
-                console.error("⚠️ Error iniciando Google Auth:", error);
+    // 1. Intentar recuperar sesión guardada al abrir el sistema
+    const savedToken = localStorage.getItem('google_access_token');
+    if (savedToken) {
+        this.accessToken = savedToken;
+        console.log("Loing: Sesión recuperada automáticamente.");
+    }
+
+    if (window.google && window.google.accounts) {
+        try {
+            this.tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CONFIG.clientId,
+                scope: 'https://www.googleapis.com/auth/drive.file',
+                callback: (tokenResponse) => {
+                    if (tokenResponse && tokenResponse.access_token) {
+                        this.accessToken = tokenResponse.access_token;
+                        
+                        // Guardamos el token para que no lo pida al cerrar/abrir
+                        localStorage.setItem('google_access_token', tokenResponse.access_token);
+                        
+                        console.log("🔑 Acceso concedido y guardado");
+                        
+                        // EJECUCIÓN INMEDIATA:
+                        this.checkPendingActions();
+                    }
+                },
+            });
+        } catch (error) {
+            console.error("⚠️ Error Auth:", error);
+        }
+    } else {
+        setTimeout(() => this.initGoogleAuth(), 1000);
+    }
+}
+
+    checkPendingActions() {
+    const pending = localStorage.getItem('pending_drive_action');
+    
+    // Solo actuamos si hay algo pendiente Y ya tenemos el token de Google
+    if (pending && this.accessToken) {
+        try {
+            const data = JSON.parse(pending);
+            console.log("🔄 Recuperando sesión para:", data.folderName);
+
+            // 1. VITAL: Restauramos los datos de la clínica en la memoria activa
+            // Si no hacemos esto, runDriveLogic no sabrá dónde buscar
+            this.selectedFolderId = data.folderId;
+            this.selectedClinicName = data.clinicName;
+
+            // 2. Limpieza del reproductor
+            if (this.videoPlayer) {
+                this.videoPlayer.resetFlags(); 
             }
-        } else {
-            console.log("⏳ Esperando librería de Google...");
-            // Reintentar en 1 segundo si no ha cargado
-            setTimeout(() => this.initGoogleAuth(), 1000);
+
+            // 3. Borramos la memoria temporal para no repetir la acción al recargar
+            localStorage.removeItem('pending_drive_action');
+
+            // 4. Ejecutamos la lógica de Drive
+            this.runDriveLogic(data.folderName);
+
+        } catch (e) {
+            console.error("❌ Error al procesar acción pendiente:", e);
+            localStorage.removeItem('pending_drive_action');
         }
     }
+}
 
     // --- B. ESCANEO DE CARPETAS ---
     async loadClinicsFromDrive() {
@@ -152,13 +190,10 @@ class ClinicManager {
         const dynamicPrefix = (this.selectedClinicName || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
         const folderName = `${dynamicPrefix}${tema}${numero}${prioridad}`;
 
-        // 🛡️ SOLUCIÓN AL ERROR DE LA FOTO 2
-        // Si tokenClient es null, significa que Google no cargó. Reintentamos forzosamente.
         if (!this.tokenClient) {
             console.warn("⚠️ Google Login no estaba listo. Reintentando inicializar...");
             this.initGoogleAuth();
             
-            // Si sigue sin estar listo, mostramos alerta al usuario
             if (!this.tokenClient) {
                 alert("⏳ El sistema de seguridad de Google está cargando. Por favor espera 2 segundos y vuelve a intentar.");
                 return;
@@ -166,79 +201,146 @@ class ClinicManager {
         }
 
         if (!this.accessToken) {
-            this.pendingAction = () => this.runDriveLogic(folderName);
-            // Esto abrirá el popup de login
-            this.tokenClient.requestAccessToken();
-        } else {
-            this.runDriveLogic(folderName);
-        }
+        // 1. Guardamos la intención en el disco por si la página se refresca
+        const stateToSave = {
+            folderId: this.selectedFolderId,
+            clinicName: this.selectedClinicName,
+            folderName: folderName
+        };
+        localStorage.setItem('pending_drive_action', JSON.stringify(stateToSave));
+        
+        console.log("💾 Datos guardados en LocalStorage. Pidiendo permiso a Google...");
+
+        // 2. Pedimos el token (esto abrirá el popup o redireccionará)
+        this.tokenClient.requestAccessToken();
+    } else {
+        // Si ya tenemos el token (porque ya iniciaste sesión antes), vamos directo
+        this.runDriveLogic(folderName);
     }
+}
 
     async runDriveLogic(folderName) {
-        const btn = document.getElementById('btn-process-code');
-        const originalText = btn ? btn.innerText : 'Procesando';
-        if (btn) { btn.innerText = "⏳ Creando..."; btn.disabled = true; }
-
-        const newTab = window.open('', '_blank');
-        if (newTab) newTab.document.write('<h1 style="font-family:sans-serif;text-align:center;margin-top:20%">Conectando con Drive...</h1>');
-
-        try {
-            // 1. Buscar si existe
-            const q = `name = '${folderName}' and '${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-            const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,webViewLink)`;
-            
-            const searchRes = await fetch(searchUrl, { 
-                headers: { 'Authorization': `Bearer ${this.accessToken}` } 
-            });
-            const searchData = await searchRes.json();
-
-            let targetLink = null;
-            let status = 'created';
-
-            if (searchData.files && searchData.files.length > 0) {
-                status = 'exists';
-                targetLink = searchData.files[0].webViewLink;
-            } else {
-                // 2. Crear carpeta
-                const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.accessToken}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        name: folderName,
-                        mimeType: 'application/vnd.google-apps.folder',
-                        parents: [this.selectedFolderId]
-                    })
-                });
-                const createData = await createRes.json();
-                targetLink = createData.webViewLink;
-            }
-
-            if (newTab && targetLink) {
-                const color = status === 'created' ? '#28a745' : '#ffc107';
-                const title = status === 'created' ? '✅ CARPETA CREADA' : '⚠️ CARPETA EXISTENTE';
-                newTab.document.body.innerHTML = `
-                    <div style="background:${color};height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;color:white;">
-                        <h1 style="font-size:3rem;">${title}</h1>
-                        <h2>${folderName}</h2>
-                        <p>Abriendo en Google Drive...</p>
-                    </div>`;
-                setTimeout(() => newTab.location.href = targetLink, 2000);
-            }
-
-            if (this.codeInput) this.codeInput.value = '';
-            this.showStep('step-decision');
-
-        } catch (error) {
-            console.error(error);
-            if (newTab) newTab.close();
-            alert("Error: " + error.message);
-        } finally {
-            if (btn) { btn.innerText = originalText; btn.disabled = false; }
-        }
+    // 1. Verificación de Seguridad: ¿Tenemos token?
+    if (!this.accessToken) {
+        alert("⚠️ Sesión expirada. Por favor, inicia sesión de nuevo.");
+        this.initGoogleAuth();
+        return;
     }
+
+    const btn = document.getElementById('btn-process-code');
+    const originalText = btn ? btn.innerText : 'Procesando';
+    if (btn) { btn.innerText = "⏳ Conectando..."; btn.disabled = true; }
+
+    // Preparamos la pestaña con un diseño de carga más profesional
+    const newTab = window.open('', '_blank');
+    if (newTab) {
+        newTab.document.write(`
+            <div id="loader" style="height:100vh;display:flex;justify-content:center;align-items:center;font-family:sans-serif;background:#f4f4f4;">
+                <div style="text-align:center;">
+                    <div style="border:8px solid #f3f3f3;border-top:8px solid #3498db;border-radius:50%;width:60px;height:60px;animation:spin 2s linear infinite;margin:0 auto;"></div>
+                    <h2 style="color:#555;">Conectando con Google Drive...</h2>
+                    <p style="color:#888;">Preparando carpeta: ${folderName}</p>
+                </div>
+                <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+            </div>
+        `);
+    }
+
+    try {
+        // 1. Guardar la acción actual como pendiente por si el token falla y necesitamos recargar
+        localStorage.setItem('pending_drive_action', JSON.stringify({
+            folderName: folderName,
+            folderId: this.selectedFolderId,
+            clinicName: this.selectedClinicName
+        }));
+
+        // 2. Buscar si la carpeta ya existe
+        const q = `name = '${folderName}' and '${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,webViewLink)`;
+        
+        const searchRes = await fetch(searchUrl, { 
+            headers: { 'Authorization': `Bearer ${this.accessToken}` } 
+        });
+
+        // --- VALIDACIÓN DE TOKEN ---
+        if (searchRes.status === 401) {
+            throw new Error("UNAUTHORIZED");
+        }
+        // ---------------------------
+        
+        if (!searchRes.ok) throw new Error("Error en la comunicación con Google");
+        
+        const searchData = await searchRes.json();
+        let targetLink = null;
+        let isNew = false;
+
+        if (searchData.files && searchData.files.length > 0) {
+            targetLink = searchData.files[0].webViewLink;
+        } else {
+            // 3. Crear carpeta si no existe
+            const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: folderName,
+                    mimeType: 'application/vnd.google-apps.folder',
+                    parents: [this.selectedFolderId]
+                })
+            });
+
+            if (createRes.status === 401) throw new Error("UNAUTHORIZED");
+            if (!createRes.ok) throw new Error("Error al crear la carpeta");
+
+            const createData = await createRes.json();
+            targetLink = createData.webViewLink;
+            isNew = true;
+        }
+
+        // 4. Si llegamos aquí, todo salió bien: Borramos la acción pendiente
+        localStorage.removeItem('pending_drive_action');
+
+        // 5. Actualizar la pestaña con el resultado
+        if (newTab && targetLink) {
+            const color = isNew ? '#28a745' : '#ffc107';
+            const title = isNew ? '✅ CARPETA CREADA' : '⚠️ CARPETA ENCONTRADA';
+            
+            newTab.document.body.innerHTML = `
+                <div style="background:${color};height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;color:white;transition: all 0.5s;">
+                    <h1 style="font-size:3rem;margin-bottom:0;">${title}</h1>
+                    <h2 style="font-weight:300;margin-top:10px;">${folderName}</h2>
+                    <p style="background:rgba(0,0,0,0.1);padding:10px 20px;border-radius:20px;">Redirigiendo en segundos...</p>
+                </div>`;
+            
+            setTimeout(() => { newTab.location.href = targetLink; }, 1500);
+        }
+
+        if (this.codeInput) this.codeInput.value = '';
+        this.showStep('step-decision');
+
+    } catch (error) {
+        console.error("❌ Error en Drive Logic:", error);
+        
+        if (error.message === "UNAUTHORIZED") {
+        if (newTab) newTab.close();
+        // Ya no hace falta el alert molesto, el botón dirá qué hacer
+        this.handleAuthError(); 
+        } else {
+            if (newTab) newTab.close();
+            alert("No se pudo conectar con Drive: " + error.message);
+        }
+    } finally {
+        if (btn) { btn.innerText = originalText; btn.disabled = false; }
+    }
+}
+
+handleAuthError() {
+    localStorage.removeItem('google_access_token');
+    this.accessToken = null;
+    this.initGoogleAuth(); // Lanza el selector de cuenta de Google
+}
 }
 
 // ==========================================
@@ -246,42 +348,177 @@ class ClinicManager {
 // ==========================================
 class VideoPlayer {
     constructor() {
-        this.videoElement = document.getElementById('main-player');
-        this.rootFolderId = null;
-        if (this.videoElement) {
-            this.videoElement.onended = () => this.playNextCycle();
-            this.videoElement.onerror = () => setTimeout(() => this.playNextCycle(), 2000);
-        }
+    this.videoElement = document.getElementById('main-player');
+    this.rootFolderId = null;
+    this.fadeStarted = false;
+    this.isLoading = false; 
+    this.lastFolderId = null;
+    
+    this.folders = { alta: [], media: [], baja: [] };
+    this.shuffledQueues = {}; 
+
+    if (this.videoElement) {
+        this.videoElement.ontimeupdate = () => this.checkVideoTime();
+        // Si el video falla, desbloqueamos y saltamos al siguiente
+        this.videoElement.onerror = () => {
+            console.error("❌ Error de reproducción, recuperando...");
+            this.resetFlags();
+            setTimeout(() => this.playNextCycle(), 1000);
+        };
+    }
+    this.lastPriorityUpdate = { alta: Date.now(), media: Date.now() };
+}
+
+// Función auxiliar para limpiar estados
+resetFlags() {
+    this.fadeStarted = false;
+    this.isLoading = false;
+}
+
+    checkVideoTime() {
+        if (!this.videoElement || !this.videoElement.duration) return;
+
+        const triggerTime = 2.5; // 2 segundos antes del final
+        const timeLeft = this.videoElement.duration - this.videoElement.currentTime;
+
+        // Si falta poco y no hemos iniciado la transición
+        if (timeLeft <= triggerTime && !this.fadeStarted) {
+        this.fadeStarted = true;
+        console.log("🌓 Iniciando transición anticipada...");
+        
+        // Iniciamos el fundido negro inmediatamente
+        this.videoElement.classList.add('video-fade-out');
+        
+        // Ejecutamos la carga del siguiente
+        this.playNextCycle(); 
+    }
     }
 
     init(folderId) {
         this.rootFolderId = folderId;
-        this.playNextCycle();
+        this.scanFolders();
     }
 
-    async playNextCycle() {
+    async scanFolders() {
         try {
-            if(this.videoElement) this.videoElement.classList.add('video-fade-out');
-            
-            const q = `'${this.rootFolderId}' in parents and mimeType contains 'video/' and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id)`;
+            const q = `'${this.rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
             const res = await fetch(url);
             const data = await res.json();
 
-            if (data.files && data.files.length > 0) {
-                const video = data.files[Math.floor(Math.random() * data.files.length)];
-                this.videoElement.src = `https://drive.google.com/uc?export=download&id=${video.id}`;
-                await this.videoElement.play();
-                this.videoElement.classList.remove('video-fade-out');
-            } else {
-                // Si no hay videos, reintentamos en 5s
-                setTimeout(() => this.playNextCycle(), 5000);
-            }
-        } catch (error) {
-            console.error("Error reproductor:", error);
-            setTimeout(() => this.playNextCycle(), 5000);
-        }
+            this.folders = { alta: [], media: [], baja: [] };
+            data.files.forEach(f => {
+                const name = f.name.toUpperCase();
+                if (name.endsWith('A')) this.folders.alta.push(f.id);
+                else if (name.endsWith('M')) this.folders.media.push(f.id);
+                else this.folders.baja.push(f.id);
+            });
+
+            console.log("📂 Sistema organizado:", this.folders);
+            this.playNextCycle();
+        } catch (e) { console.error("Error scan:", e); }
     }
+
+    async playNextCycle() {
+    // Si ya estamos cargando un video, ignoramos cualquier otra orden
+    if (this.isLoading) return;
+    this.isLoading = true;
+
+    const now = Date.now();
+    let targetFolderId = null;
+
+    // 1. Lógica de Intensidad A (5 min)
+    if (this.folders.alta.length > 0 && (now - this.lastPriorityUpdate.alta >= 300000)) {
+        targetFolderId = this.folders.alta[Math.floor(Math.random() * this.folders.alta.length)];
+        this.lastPriorityUpdate.alta = now;
+    } 
+    // 2. Lógica de Intensidad M (8 min)
+    else if (this.folders.media.length > 0 && (now - this.lastPriorityUpdate.media >= 480000)) {
+        targetFolderId = this.folders.media[Math.floor(Math.random() * this.folders.media.length)];
+        this.lastPriorityUpdate.media = now;
+    } 
+    // 3. Reproducción Normal
+    else {
+        let pool = [...this.folders.baja];
+        if (pool.length === 0) pool = [...this.folders.media, ...this.folders.alta];
+
+        // 🛡️ EVITAR REPETIR CARPETA:
+        // Si hay más de una carpeta disponible, filtramos la que acabamos de usar
+        if (pool.length > 1) {
+            pool = pool.filter(id => id !== this.lastFolderId);
+        }
+        
+        targetFolderId = pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    this.lastFolderId = targetFolderId; // Recordamos esta carpeta para la próxima
+
+    if (targetFolderId) {
+        this.loadVideoFromFolder(targetFolderId);
+    } else {
+        this.isLoading = false;
+    }
+}
+
+    async loadVideoFromFolder(folderId) {
+    try {
+        // 1. Preparar la cola de la carpeta
+        if (!this.shuffledQueues[folderId] || this.shuffledQueues[folderId].length === 0) {
+            const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (!data.files || data.files.length === 0) {
+                this.resetFlags();
+                return this.playNextCycle();
+            }
+
+            let videos = [...data.files];
+            for (let i = videos.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [videos[i], videos[j]] = [videos[j], videos[i]];
+            }
+            this.shuffledQueues[folderId] = videos;
+        }
+
+        const video = this.shuffledQueues[folderId].shift();
+
+        if (this.videoElement) {
+            // Reforzamos el fade out
+            this.videoElement.classList.add('video-fade-out');
+
+            setTimeout(async () => {
+                try {
+                    // Limpieza agresiva del video anterior
+                    this.videoElement.pause();
+                    this.videoElement.removeAttribute('src'); 
+                    this.videoElement.load();
+
+                    const videoSrc = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
+                    this.videoElement.src = videoSrc;
+                    
+                    await this.videoElement.play();
+                    this.videoElement.classList.remove('video-fade-out');
+                    console.log(`🎬 Jugando: ${video.name}`);
+                } catch (e) {
+                    console.warn("Autoplay bloqueado, reintentando con mute...");
+                    this.videoElement.muted = true;
+                    await this.videoElement.play().catch(err => console.error("Fallo total play", err));
+                    this.videoElement.classList.remove('video-fade-out');
+                } finally {
+                    // PASE LO QUE PASE, desbloqueamos para el siguiente video
+                    this.resetFlags();
+                }
+            }, 1000); 
+        }
+    } catch (error) {
+        console.error("Error en carga:", error);
+        this.resetFlags();
+        if(this.videoElement) this.videoElement.classList.remove('video-fade-out');
+        setTimeout(() => this.playNextCycle(), 3000);
+    }
+}
 }
 
 function updateClock() {
