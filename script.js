@@ -38,6 +38,15 @@ class ClinicManager {
         this.loadClinicsFromDrive(); 
     }
 
+    forceLogin() {
+        console.warn("🔄 Token expirado. Solicitando nuevo inicio de sesión...");
+        localStorage.removeItem('google_access_token'); // Borramos el token viejo
+        this.accessToken = null;
+        if (this.tokenClient) {
+            this.tokenClient.requestAccessToken(); // Abre la ventana de Google
+        }
+    }
+
     // --- A. AUTENTICACIÓN GOOGLE (Igual que antes) ---
     initGoogleAuth() {
         const savedToken = localStorage.getItem('google_access_token');
@@ -141,6 +150,16 @@ class ClinicManager {
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,webViewLink)&key=${CONFIG.apiKey}`;
             
             const res = await fetch(url, { headers: { 'Authorization': `Bearer ${this.accessToken}` } });
+
+            // ======================================================
+            // 🛑 AQUÍ ESTÁ EL CAMBIO: Detectar token vencido
+            // ======================================================
+            if (res.status === 401 || res.status === 403) {
+                this.forceLogin(); // Llama a la función que pide login de nuevo
+                return; // Detiene todo para no seguir con errores
+            }
+            // ======================================================
+
             const data = await res.json();
 
             listContainer.innerHTML = '';
@@ -270,7 +289,6 @@ class ClinicManager {
         btn.disabled = true;
 
         try {
-            // 1. Crear
             const res = await fetch('https://www.googleapis.com/drive/v3/files', {
                 method: 'POST',
                 headers: {
@@ -284,8 +302,14 @@ class ClinicManager {
                 })
             });
 
+            // --- CAMBIO IMPORTANTE AQUÍ ---
+            if (res.status === 401) { 
+                this.forceLogin(); 
+                return; 
+            }
+            // -----------------------------
+
             if (res.ok) {
-                // Recargar lista y limpiar ID
                 await this.loadDashboard();
                 document.getElementById('new-id').value = ""; 
                 this.updatePreview(); 
