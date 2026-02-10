@@ -1,23 +1,11 @@
-// ==========================================
-// 1. CONFIGURACIÓN DEL SISTEMA
-// ==========================================
 const CONFIG = {
-    // 🔑 TU API KEY (Debe estar habilitada para Google Drive API)
     apiKey: 'AIzaSyA4zAEI5Y4HR5N00DYuZp4vr5FfnXI_LDI', 
 
-    // 🔑 TU CLIENT ID
     clientId: '994191676825-fohd1rt8hfrq7ff1b2u2jr8pj8jhafca.apps.googleusercontent.com',
 
-    // 📂 ID DE LA CARPETA MAESTRA
     masterFolderId: '1p1kQo3-Yu4NuII1DDCZlN2HGEy_VUaxH' 
 };
 
-// ==========================================
-// 2. GESTOR DE CLÍNICAS (MENÚ E INTERFAZ)
-// ==========================================
-// ==========================================
-// 2. GESTOR DE CLÍNICAS (ACTUALIZADO DASHBOARD)
-// ==========================================
 class ClinicManager {
     constructor(playerInstance) {
         this.player = playerInstance;

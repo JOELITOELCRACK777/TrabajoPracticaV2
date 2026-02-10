@@ -36,7 +36,6 @@ body, html {
     color: var(--text-white);
 }
 
-/* --- MENÚ --- */
 .overlay-menu {
     position: absolute;
     top: 0;
@@ -88,7 +87,6 @@ body, html {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* --- ESTRUCTURA APP --- */
 .app {
     display: flex;
     width: 100vw;
@@ -100,7 +98,7 @@ body, html {
     flex: 1; 
     background-color: #000;
     overflow: hidden;
-    display: flex; /* Centrar video si el ratio es distinto */
+    display: flex; 
     justify-content: center;
     align-items: center;
 }
