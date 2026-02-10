@@ -36,8 +36,7 @@ class ClinicManager {
         this.clinicTitle = document.getElementById('clinic-title-display');
 
         // Inicializar Auth y Carga
-        this.initGoogleAuth(); 
-        this.loadClinicsFromDrive(); 
+        this.initGoogleAuth();  
     }
 
     forceLogin() {
@@ -49,40 +48,96 @@ class ClinicManager {
         }
     }
 
+    renderLoginScreen() {
+        if (!this.containerClinics) return;
+
+        this.containerClinics.innerHTML = `
+            <div class="d-flex flex-column align-items-center justify-content-center mt-5">
+                <h4 class="text-white mb-4">Bienvenido</h4>
+                <p class="text-white-50 mb-4 text-center small">Inicia sesión para acceder a tus carpetas.</p>
+                <button id="btn-login-drive" class="btn btn-primary btn-lg shadow-sm">
+                    🔐 Conectar con Google Drive
+                </button>
+            </div>
+        `;
+
+        // Al hacer clic, pedimos el token
+        document.getElementById('btn-login-drive').onclick = () => {
+            if (this.tokenClient) {
+                this.tokenClient.requestAccessToken();
+            }
+        };
+    }
+
     // --- A. AUTENTICACIÓN GOOGLE (Igual que antes) ---
     initGoogleAuth() {
-        const savedToken = localStorage.getItem('google_access_token');
-        if (savedToken) { this.accessToken = savedToken; }
-
+        // 1. Configuración del Cliente de Google (Igual que antes)
         if (window.google && window.google.accounts) {
             this.tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CONFIG.clientId,
-                scope: 'https://www.googleapis.com/auth/drive', // Scope un poco más amplio para borrar
+                scope: 'https://www.googleapis.com/auth/drive',
                 callback: (tokenResponse) => {
                     if (tokenResponse && tokenResponse.access_token) {
+                        // Guardamos el token nuevo
                         this.accessToken = tokenResponse.access_token;
                         localStorage.setItem('google_access_token', tokenResponse.access_token);
-                        // Si estábamos en el dashboard, recargar lista
-                        if(!document.getElementById('step-dashboard').classList.contains('d-none')){
+                        
+                        // LÓGICA DE RECARGA:
+                        // Si estábamos en el dashboard, recargamos la lista de carpetas internas
+                        if(document.getElementById('step-dashboard') && !document.getElementById('step-dashboard').classList.contains('d-none')){
                             this.loadDashboard();
+                        } else {
+                            // Si estábamos en el inicio (pantalla de login), cargamos las clínicas
+                            this.loadClinicsFromDrive();
                         }
                     }
                 },
             });
         } else {
+            // Reintento si la librería no cargó
             setTimeout(() => this.initGoogleAuth(), 1000);
+            return;
+        }
+
+        // 2. VERIFICACIÓN INICIAL (Esto es lo nuevo)
+        const savedToken = localStorage.getItem('google_access_token');
+        
+        if (savedToken) {
+            // A) Hay token guardado: Intentamos cargar directo
+            console.log("✅ Token detectado. Intentando cargar...");
+            this.accessToken = savedToken;
+            this.loadClinicsFromDrive(); 
+        } else {
+            // B) No hay token: Mostramos el botón de login
+            console.warn("🔒 Sin sesión. Mostrando login.");
+            this.renderLoginScreen();
         }
     }
 
     // --- B. CARGA INICIAL ---
     async loadClinicsFromDrive() {
-        // (Tu lógica original de carga de clínicas se mantiene igual en estructura)
         try {
+            // Consulta a la API
             const q = `'${CONFIG.masterFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&key=${CONFIG.apiKey}`;
-            const response = await fetch(url);
+            
+            // [CRÍTICO] Añadimos el Header de Autorización si existe el token
+            const headers = this.accessToken ? { 'Authorization': `Bearer ${this.accessToken}` } : {};
+
+            const response = await fetch(url, { headers });
+
+            // [NUEVO] Si el token venció (Error 401) o no tiene permiso (403)
+            if (response.status === 401 || response.status === 403) {
+                console.warn("🚫 Token vencido o inválido. Volviendo al login...");
+                localStorage.removeItem('google_access_token'); // Borramos el token malo
+                this.accessToken = null;
+                this.renderLoginScreen(); // Mostramos el botón otra vez
+                return; // Cortamos la ejecución aquí
+            }
+
             const data = await response.json();
             
+            // Renderizado de botones (Tu lógica original)
             if (this.containerClinics) this.containerClinics.innerHTML = '';
             
             if (data.files) {
@@ -93,8 +148,15 @@ class ClinicManager {
                     btn.onclick = () => this.selectClinic(folder.name, folder.id);
                     this.containerClinics.appendChild(btn);
                 });
+            } else if (data.error) {
+                console.error("Error API:", data.error);
             }
-        } catch (error) { console.error("Error cargando clínicas", error); }
+
+        } catch (error) { 
+            console.error("Error cargando clínicas", error);
+            // Opcional: Mostrar mensaje de error en pantalla
+            if(this.containerClinics) this.containerClinics.innerHTML = '<div class="text-danger">Error de conexión</div>';
+        }
     }
 
     // --- C. NAVEGACIÓN ---
