@@ -28,6 +28,8 @@ class ClinicManager {
         this.accessToken = null;
         this.tokenClient = null;
 
+        this.allFolders = [];
+
         // Referencias DOM
         this.containerClinics = document.getElementById('clinics-container');
         this.menuOverlay = document.getElementById('clinic-menu');
@@ -127,15 +129,52 @@ class ClinicManager {
         this.player.init(this.selectedFolderId);
     }
 
+    renderFolderList(filesToRender) {
+        const listContainer = document.getElementById('folders-list');
+        listContainer.innerHTML = '';
+
+        if (!filesToRender || filesToRender.length === 0) {
+            listContainer.innerHTML = '<div class="text-white-50 text-center small mt-3">No se encontraron carpetas.</div>';
+            return;
+        }
+
+        filesToRender.forEach(folder => {
+            const lastChar = folder.name.slice(-1).toUpperCase();
+            let borderClass = 'border-intensity-B';
+            if(lastChar === 'A') borderClass = 'border-intensity-A';
+            if(lastChar === 'M') borderClass = 'border-intensity-M';
+
+            const div = document.createElement('div');
+            div.className = `folder-item ${borderClass} d-flex align-items-center`;
+            
+            div.innerHTML = `
+                <div class="me-3">
+                    <input class="form-check-input folder-checkbox" type="checkbox" value="${folder.id}" style="transform: scale(1.3); cursor:pointer;">
+                </div>
+
+                <div class="flex-grow-1" style="min-width: 0;">
+                    <div class="fw-bold text-white small text-truncate">${folder.name}</div>
+                    <div class="text-white-50" style="font-size:0.7rem" id="count-${folder.id}">...</div>
+                </div>
+                
+                <div class="btn-group ms-2" role="group">
+                    <button class="btn btn-outline-light btn-sm px-2" onclick="clinicManager.openFolder('${folder.webViewLink}')">📂</button>
+                    <button class="btn btn-outline-warning btn-sm px-2" onclick="clinicManager.editIntensity('${folder.id}', '${folder.name}')">✏️</button>
+                    <button class="btn btn-outline-danger btn-sm px-2" onclick="clinicManager.deleteFolderById('${folder.id}', '${folder.name}')">🗑️</button>
+                </div>
+            `;
+            listContainer.appendChild(div);
+            // Calculamos videos en segundo plano
+            this.countVideos(folder.id);
+        });
+    }
+
     // ==========================================
     // D. DASHBOARD INTELIGENTE (NUEVO CÓDIGO)
     // ==========================================
 
     async loadDashboard() {
-        if (!this.accessToken) {
-            this.tokenClient.requestAccessToken();
-            return;
-        }
+        if (!this.accessToken) { this.tokenClient.requestAccessToken(); return; }
 
         this.showStep('step-dashboard');
         this.updatePreview(); 
@@ -143,71 +182,87 @@ class ClinicManager {
         const listContainer = document.getElementById('folders-list');
         listContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info small"></div></div>';
 
+        // --- INYECCIÓN DE UI (Buscador + Botón) ---
+        let actionArea = document.getElementById('dashboard-actions-dynamic');
+        
+        // Si no existe el área de acciones, la creamos
+        if(!actionArea) {
+             actionArea = document.createElement('div');
+             actionArea.id = 'dashboard-actions-dynamic';
+             actionArea.className = 'mb-3';
+             
+             // HTML del Buscador y Botón
+             actionArea.innerHTML = `
+                <div class="input-group mb-2">
+                    <span class="input-group-text bg-dark text-white border-secondary">🔍</span>
+                    <input type="text" id="folder-search-input" class="form-control bg-dark text-white border-secondary" placeholder="Buscar carpeta (Ej: ODO, PED...)">
+                </div>
+                <div class="d-grid">
+                    <button class="btn btn-success fw-bold shadow-sm" onclick="clinicManager.playSelectedFolders()">
+                        ▶ REPRODUCIR SELECCIÓN
+                    </button>
+                </div>
+             `;
+             listContainer.parentNode.insertBefore(actionArea, listContainer);
+
+             // --- LÓGICA DE BÚSQUEDA CORREGIDA ---
+             const searchInput = document.getElementById('folder-search-input');
+             
+             searchInput.addEventListener('input', (e) => {
+                 const text = e.target.value.toUpperCase().trim();
+                 
+                 // Si el input está vacío, mostramos todo
+                 if (text === "") {
+                     this.renderFolderList(this.allFolders);
+                     return;
+                 }
+
+                 // Filtramos si el nombre INCLUYE el texto (ej: "ODO" encuentra "CSJODO")
+                 const filtered = this.allFolders.filter(f => f.name.toUpperCase().includes(text));
+                 this.renderFolderList(filtered);
+             });
+        }
+        // ------------------------------------------
+
         try {
             const q = `'${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-            
-            // ACTUALIZACIÓN: Ahora pedimos también 'webViewLink' para poder abrir la carpeta
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,webViewLink)&key=${CONFIG.apiKey}`;
-            
             const res = await fetch(url, { headers: { 'Authorization': `Bearer ${this.accessToken}` } });
 
-            // ======================================================
-            // 🛑 AQUÍ ESTÁ EL CAMBIO: Detectar token vencido
-            // ======================================================
-            if (res.status === 401 || res.status === 403) {
-                this.forceLogin(); // Llama a la función que pide login de nuevo
-                return; // Detiene todo para no seguir con errores
-            }
-            // ======================================================
+            if (res.status === 401 || res.status === 403) { this.forceLogin(); return; }
 
             const data = await res.json();
-
-            listContainer.innerHTML = '';
             
-            if (!data.files || data.files.length === 0) {
-                listContainer.innerHTML = '<div class="text-white-50 text-center small mt-3">No hay carpetas creadas.</div>';
-                return;
-            }
+            this.allFolders = data.files || [];
+            this.allFolders.sort((a, b) => a.name.localeCompare(b.name));
 
-            data.files.sort((a, b) => a.name.localeCompare(b.name));
-
-            data.files.forEach(folder => {
-                const lastChar = folder.name.slice(-1).toUpperCase();
-                let borderClass = 'border-intensity-B';
-                if(lastChar === 'A') borderClass = 'border-intensity-A';
-                if(lastChar === 'M') borderClass = 'border-intensity-M';
-
-                const div = document.createElement('div');
-                div.className = `folder-item ${borderClass}`;
-                
-                // ACTUALIZACIÓN: Añadidos botones de Drive y Edición
-                div.innerHTML = `
-                    <div class="d-flex flex-column justify-content-center" style="max-width: 50%;">
-                        <div class="fw-bold text-white small text-truncate">${folder.name}</div>
-                        <div class="text-white-50" style="font-size:0.7rem" id="count-${folder.id}">Calculando...</div>
-                    </div>
-                    
-                    <div class="btn-group" role="group">
-                        <button class="btn btn-outline-light btn-sm px-2" onclick="clinicManager.openFolder('${folder.webViewLink}')" title="Abrir en Google Drive">
-                            📂
-                        </button>
-                        <button class="btn btn-outline-warning btn-sm px-2" onclick="clinicManager.editIntensity('${folder.id}', '${folder.name}')" title="Cambiar Intensidad">
-                            ✏️
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm px-2" onclick="clinicManager.deleteFolderById('${folder.id}', '${folder.name}')" title="Eliminar Carpeta">
-                            🗑️
-                        </button>
-                    </div>
-                `;
-                listContainer.appendChild(div);
-                
-                this.countVideos(folder.id);
-            });
+            // Renderizamos la lista completa al inicio
+            this.renderFolderList(this.allFolders);
 
         } catch (e) {
             console.error(e);
             listContainer.innerHTML = '<div class="text-danger small text-center">Error de conexión.</div>';
         }
+    }
+
+    playSelectedFolders() {
+        // 1. Buscar todos los checkboxes marcados
+        const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+        
+        // 2. Validación
+        if (checkboxes.length === 0) {
+            alert("⚠️ Por favor selecciona al menos una carpeta para armar la playlist.");
+            return;
+        }
+
+        // 3. Extraer los IDs
+        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+        // 4. Iniciar el Player con la "Lista Blanca"
+        console.log("Armando playlist con IDs:", selectedIds);
+        
+        this.menuOverlay.classList.add('slide-up'); // Cerrar menú
+        this.player.init(this.selectedFolderId, selectedIds); // Pasamos los IDs al player
     }
 
     openFolder(link) {
@@ -408,11 +463,13 @@ resetFlags() {
     }
     }
 
-    init(folderId) {
+    init(folderId, allowedIds = null) {
         this.rootFolderId = folderId;
+        this.allowedFolderIds = allowedIds; // Guardamos la selección
         this.scanFolders();
     }
 
+    // 2. Modifica scanFolders para filtrar si hay selección
     async scanFolders() {
         try {
             const q = `'${this.rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
@@ -421,7 +478,18 @@ resetFlags() {
             const data = await res.json();
 
             this.folders = { alta: [], media: [], baja: [] };
-            data.files.forEach(f => {
+            
+            // --- AQUÍ ESTÁ EL FILTRO NUEVO ---
+            let foldersToProcess = data.files || [];
+
+            // Si el usuario seleccionó carpetas específicas, filtramos
+            if (this.allowedFolderIds && this.allowedFolderIds.length > 0) {
+                foldersToProcess = foldersToProcess.filter(f => this.allowedFolderIds.includes(f.id));
+                console.log("🎯 Reproduciendo solo selección:", this.allowedFolderIds.length, "carpetas.");
+            }
+            // ---------------------------------
+
+            foldersToProcess.forEach(f => {
                 const name = f.name.toUpperCase();
                 if (name.endsWith('A')) this.folders.alta.push(f.id);
                 else if (name.endsWith('M')) this.folders.media.push(f.id);
@@ -429,7 +497,7 @@ resetFlags() {
             });
 
             console.log("📂 Sistema organizado:", this.folders);
-            this.playNextCycle();
+            this.playNextCycle(); // Arranca el player
         } catch (e) { console.error("Error scan:", e); }
     }
 
