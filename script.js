@@ -193,6 +193,7 @@ class ClinicManager {
 
     renderFolderList(filesToRender) {
         const listContainer = document.getElementById('folders-list');
+        if (!listContainer) return;
         listContainer.innerHTML = '';
 
         if (!filesToRender || filesToRender.length === 0) {
@@ -400,6 +401,7 @@ class ClinicManager {
     async createFolderFromUI() {
         const folderName = this.updatePreview();
         const btn = document.querySelector('.creation-panel button');
+        if (!btn) { alert('Error interno: botón no encontrado'); return; }
         const originalText = btn.innerText;
         
         btn.innerText = "⏳";
@@ -482,14 +484,18 @@ class VideoPlayer {
     this.videoElement = document.getElementById('main-player');
     this.rootFolderId = null;
     this.fadeStarted = false;
+    this.audioFadeStarted = false;
+    this.audioFadeInterval = null;
     this.isLoading = false; 
     this.lastFolderId = null;
     
     this.folders = { alta: [], media: [], baja: [] };
     this.shuffledQueues = {}; 
+    this.currentObjectUrl = null;
 
     if (this.videoElement) {
-        this.videoElement.ontimeupdate = () => this.checkVideoTime();
+        // Evento cuando el video termina naturalmente
+        this.videoElement.onended = () => this.onVideoEnded();
         // Si el video falla, desbloqueamos y saltamos al siguiente
         this.videoElement.onerror = () => {
             console.error("❌ Error de reproducción, recuperando...");
@@ -500,29 +506,65 @@ class VideoPlayer {
     this.lastPriorityUpdate = { alta: Date.now(), media: Date.now() };
 }
 
-// Función auxiliar para limpiar estados
-resetFlags() {
-    this.fadeStarted = false;
-    this.isLoading = false;
-}
+    // Función auxiliar para limpiar estados
+    resetFlags() {
+        this.fadeStarted = false;
+        this.audioFadeStarted = false;
+        this.isLoading = false;
+        // Cancelar cualquier fade-out de audio en progreso
+        if (this.audioFadeInterval) {
+            clearInterval(this.audioFadeInterval);
+            this.audioFadeInterval = null;
+        }
+        // Restaurar volumen a máximo
+        if (this.videoElement) {
+            this.videoElement.volume = 1;
+        }
+    }
 
-    checkVideoTime() {
-        if (!this.videoElement || !this.videoElement.duration) return;
-
-        const triggerTime = 2.5; // 2 segundos antes del final
-        const timeLeft = this.videoElement.duration - this.videoElement.currentTime;
-
-        // Si falta poco y no hemos iniciado la transición
-        if (timeLeft <= triggerTime && !this.fadeStarted) {
+    onVideoEnded() {
+        if (this.fadeStarted) return;
         this.fadeStarted = true;
-        console.log("🌓 Iniciando transición anticipada...");
+        console.log("🌓 Video terminado, iniciando fade-out suave...");
         
-        // Iniciamos el fundido negro inmediatamente
+        // Iniciamos el fundido de audio (fade-out suave de 4 segundos)
+        if (!this.audioFadeStarted) {
+            this.audioFadeStarted = true;
+            this.fadeOutAudio(4); // 4 segundos de fade-out muy suave
+        }
+        
+        // Iniciamos el fundido negro del video
         this.videoElement.classList.add('video-fade-out');
         
-        // Ejecutamos la carga del siguiente
-        this.playNextCycle(); 
+        // Después de que termine el fade-out, cargamos el siguiente
+        setTimeout(() => this.playNextCycle(), 4000);
     }
+
+    fadeOutAudio(duration) {
+        if (!this.videoElement) return;
+        
+        // Cancelar cualquier fade-out anterior
+        if (this.audioFadeInterval) {
+            clearInterval(this.audioFadeInterval);
+        }
+        
+        const startVolume = this.videoElement.volume;
+        const startTime = Date.now();
+        
+        this.audioFadeInterval = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / (duration * 1000), 1);
+            
+            // Usar easing ease-out para un fade más suave al final
+            const easeOut = 1 - Math.pow(1 - progress, 3);
+            this.videoElement.volume = startVolume * (1 - easeOut);
+            
+            if (progress >= 1) {
+                clearInterval(this.audioFadeInterval);
+                this.audioFadeInterval = null;
+                this.videoElement.volume = 0;
+            }
+        }, 30);
     }
 
     init(folderId, allowedIds = null) {
@@ -530,17 +572,16 @@ resetFlags() {
         this.allowedFolderIds = allowedIds; // Guardamos la selección
         this.scanFolders();
     }
-
-    // 2. Modifica scanFolders para filtrar si hay selección
     async scanFolders() {
         try {
             const q = `'${this.rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
-            const res = await fetch(url);
+            const headers = (window.clinicManager && window.clinicManager.accessToken) ? { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } : {};
+            const res = await fetch(url, { headers });
             const data = await res.json();
 
             this.folders = { alta: [], media: [], baja: [] };
-            
+
             // --- AQUÍ ESTÁ EL FILTRO NUEVO ---
             let foldersToProcess = data.files || [];
 
@@ -560,7 +601,9 @@ resetFlags() {
 
             console.log("📂 Sistema organizado:", this.folders);
             this.playNextCycle(); // Arranca el player
-        } catch (e) { console.error("Error scan:", e); }
+        } catch (e) {
+            console.error("Error scan:", e);
+        }
     }
 
     async playNextCycle() {
@@ -571,23 +614,18 @@ resetFlags() {
     const now = Date.now();
     let targetFolderId = null;
 
-    // 1. Lógica de Intensidad A (5 min)
     if (this.folders.alta.length > 0 && (now - this.lastPriorityUpdate.alta >= 300000)) {
         targetFolderId = this.folders.alta[Math.floor(Math.random() * this.folders.alta.length)];
         this.lastPriorityUpdate.alta = now;
     } 
-    // 2. Lógica de Intensidad M (8 min)
     else if (this.folders.media.length > 0 && (now - this.lastPriorityUpdate.media >= 480000)) {
         targetFolderId = this.folders.media[Math.floor(Math.random() * this.folders.media.length)];
         this.lastPriorityUpdate.media = now;
     } 
-    // 3. Reproducción Normal
     else {
         let pool = [...this.folders.baja];
         if (pool.length === 0) pool = [...this.folders.media, ...this.folders.alta];
 
-        // 🛡️ EVITAR REPETIR CARPETA:
-        // Si hay más de una carpeta disponible, filtramos la que acabamos de usar
         if (pool.length > 1) {
             pool = pool.filter(id => id !== this.lastFolderId);
         }
@@ -595,74 +633,94 @@ resetFlags() {
         targetFolderId = pool[Math.floor(Math.random() * pool.length)];
     }
 
-    this.lastFolderId = targetFolderId; // Recordamos esta carpeta para la próxima
+    this.lastFolderId = targetFolderId;
 
     if (targetFolderId) {
         this.loadVideoFromFolder(targetFolderId);
     } else {
         this.isLoading = false;
     }
-}
+    }
 
     async loadVideoFromFolder(folderId) {
-    try {
-        // 1. Preparar la cola de la carpeta
-        if (!this.shuffledQueues[folderId] || this.shuffledQueues[folderId].length === 0) {
-            const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
-            const res = await fetch(url);
-            const data = await res.json();
+        try {
+            if (!this.shuffledQueues[folderId] || this.shuffledQueues[folderId].length === 0) {
+                const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
+                const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
+                const headers = (window.clinicManager && window.clinicManager.accessToken) ? { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } : {};
+                const res = await fetch(url, { headers });
+                const data = await res.json();
 
-            if (!data.files || data.files.length === 0) {
-                this.resetFlags();
-                return this.playNextCycle();
-            }
-
-            let videos = [...data.files];
-            for (let i = videos.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [videos[i], videos[j]] = [videos[j], videos[i]];
-            }
-            this.shuffledQueues[folderId] = videos;
-        }
-
-        const video = this.shuffledQueues[folderId].shift();
-
-        if (this.videoElement) {
-            // Reforzamos el fade out
-            this.videoElement.classList.add('video-fade-out');
-
-            setTimeout(async () => {
-                try {
-                    // Limpieza agresiva del video anterior
-                    this.videoElement.pause();
-                    this.videoElement.removeAttribute('src'); 
-                    this.videoElement.load();
-
-                    const videoSrc = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
-                    this.videoElement.src = videoSrc;
-                    
-                    await this.videoElement.play();
-                    this.videoElement.classList.remove('video-fade-out');
-                    console.log(`🎬 Jugando: ${video.name}`);
-                } catch (e) {
-                    console.warn("Autoplay bloqueado, reintentando con mute...");
-                    this.videoElement.muted = true;
-                    await this.videoElement.play().catch(err => console.error("Fallo total play", err));
-                    this.videoElement.classList.remove('video-fade-out');
-                } finally {
-                    // PASE LO QUE PASE, desbloqueamos para el siguiente video
+                if (!data.files || data.files.length === 0) {
                     this.resetFlags();
+                    return this.playNextCycle();
                 }
-            }, 1000); 
+
+                let videos = [...data.files];
+                for (let i = videos.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [videos[i], videos[j]] = [videos[j], videos[i]];
+                }
+                this.shuffledQueues[folderId] = videos;
+            }
+
+            const video = this.shuffledQueues[folderId].shift();
+
+            if (this.videoElement) {
+                this.videoElement.classList.add('video-fade-out');
+
+                setTimeout(async () => {
+                    try {
+                        this.videoElement.pause();
+                        this.videoElement.volume = 1; // Restablecer volumen a máximo
+                        // Revoke previous blob URL if any
+                        if (this.currentObjectUrl) {
+                            try { URL.revokeObjectURL(this.currentObjectUrl); } catch (e) {}
+                            this.currentObjectUrl = null;
+                        }
+
+                        this.videoElement.removeAttribute('src');
+                        this.videoElement.load();
+
+                        const videoSrc = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
+
+                        // Si hay token disponible, descargamos como blob y creamos un objectURL
+                        if (window.clinicManager && window.clinicManager.accessToken) {
+                            const mediaHeaders = { 'Authorization': `Bearer ${window.clinicManager.accessToken}` };
+                            const mediaRes = await fetch(videoSrc, { headers: mediaHeaders });
+                            if (mediaRes.ok) {
+                                const blob = await mediaRes.blob();
+                                const objectUrl = URL.createObjectURL(blob);
+                                this.currentObjectUrl = objectUrl;
+                                this.videoElement.src = objectUrl;
+                            } else {
+                                // Fallback: intentar con URL pública (si aplica)
+                                this.videoElement.src = videoSrc;
+                            }
+                        } else {
+                            this.videoElement.src = videoSrc;
+                        }
+                        
+                        await this.videoElement.play();
+                        this.videoElement.classList.remove('video-fade-out');
+                        console.log(`🎬 Jugando: ${video.name}`);
+                    } catch (e) {
+                        console.warn("Autoplay bloqueado, reintentando...");
+                        await this.videoElement.play().catch(err => console.error("Fallo total play", err));
+                        this.videoElement.classList.remove('video-fade-out');
+                    } finally {
+                        // PASE LO QUE PASE, desbloqueamos para el siguiente video
+                        this.resetFlags();
+                    }
+                }, 200); 
+            }
+        } catch (error) {
+            console.error("Error en carga:", error);
+            this.resetFlags();
+            if(this.videoElement) this.videoElement.classList.remove('video-fade-out');
+            setTimeout(() => this.playNextCycle(), 3000);
         }
-    } catch (error) {
-        console.error("Error en carga:", error);
-        this.resetFlags();
-        if(this.videoElement) this.videoElement.classList.remove('video-fade-out');
-        setTimeout(() => this.playNextCycle(), 3000);
     }
-}
 }
 
 function updateClock() {
@@ -670,7 +728,7 @@ function updateClock() {
     const timeEl = document.getElementById('hora');
     const dateEl = document.getElementById('fecha');
     if(timeEl) timeEl.innerText = now.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-    if(dateEl) dateEl.innerText = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace('.', '').toUpperCase();
+    if(dateEl) dateEl.innerText = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '').toUpperCase();
 }
 
 async function updateWeather() {

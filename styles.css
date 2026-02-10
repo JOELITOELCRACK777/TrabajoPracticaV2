@@ -11,8 +11,18 @@
 }
 
 .logo-clinica{
-    float: right;
-    margin-top: -50px;
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    z-index: 20;
+    border-radius: 12px;
+    padding: 6px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    box-shadow: 0 8px 20px rgba(0,0,0,0.6), 0 0 8px rgba(13,202,240,0.06);
 }
 
 body, html {
@@ -106,6 +116,7 @@ body, html {
 
 .video-fade-out {
     opacity: 0 !important;
+    transition: opacity 1s ease-out;
 }
 
 .video-vignette {
@@ -147,6 +158,29 @@ body, html {
 /* LOGO */
 .brand-section {
     padding: var(--padding-std);
+    position: relative; /* para posicionar el logo de forma absoluta dentro */
+    height: 110px; /* espacio reservado para el logo sin empujar contenido */
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+/* Etiqueta/placa detrás del logo para mejorar contraste */
+.brand-section::before {
+    content: '';
+    position: absolute;
+    top: -50px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 96px;
+    height: 96px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(0, 38, 77, 0.95), rgba(0, 20, 40, 0.95));
+    border: 1px solid rgba(13, 202, 240, 0.25);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(13, 202, 240, 0.15);
+    z-index: 10;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
 }
 
 /* TIEMPO */
