@@ -173,27 +173,142 @@ class ClinicManager {
             if(lastChar === 'M') borderClass = 'border-intensity-M';
 
             const div = document.createElement('div');
-            div.className = `folder-item ${borderClass} d-flex align-items-center`;
+            // Agregamos un ID único al div para manipularlo visualmente al subir
+            div.id = `folder-card-${folder.id}`; 
+            div.className = `folder-item ${borderClass} d-flex align-items-center mb-2`; // Agregué mb-2 para separación
             
+            // --- EVENTOS DRAG & DROP ---
+            // 1. Al entrar con el archivo
+            div.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                div.classList.add('drag-over');
+            });
+            // 2. Al moverse sobre la carpeta
+            div.addEventListener('dragover', (e) => {
+                e.preventDefault(); 
+                div.classList.add('drag-over');
+            });
+            // 3. Al salir (cancelar)
+            div.addEventListener('dragleave', (e) => {
+                div.classList.remove('drag-over');
+            });
+            // 4. AL SOLTAR EL ARCHIVO (DROP)
+            div.addEventListener('drop', (e) => {
+                e.preventDefault();
+                div.classList.remove('drag-over');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    // Llamamos a la función de subida
+                    this.handleFileUpload(files[0], folder.id, folder.name);
+                }
+            });
+            // ---------------------------
+
             div.innerHTML = `
                 <div class="me-3">
                     <input class="form-check-input folder-checkbox" type="checkbox" value="${folder.id}" style="transform: scale(1.3); cursor:pointer;">
                 </div>
 
                 <div class="flex-grow-1" style="min-width: 0;">
-                    <div class="fw-bold text-white small text-truncate">${folder.name}</div>
-                    <div class="text-white-50" style="font-size:0.7rem" id="count-${folder.id}">...</div>
+                    <div class="fw-bold text-white small text-truncate pointer-events-none">${folder.name}</div>
+                    <span class="ms-2 text-white-50 fst-italic" style="font-size: 0.65rem; opacity: 0.6;">
+                            Arrastra tus videos aquí
+                    </span>
+                    <div class="text-white-50" style="font-size:0.7rem" id="count-${folder.id}">Calculando...</div>
                 </div>
                 
                 <div class="btn-group ms-2" role="group">
-                    <button class="btn btn-outline-light btn-sm px-2" onclick="clinicManager.openFolder('${folder.webViewLink}')">📂</button>
-                    <button class="btn btn-outline-warning btn-sm px-2" onclick="clinicManager.editIntensity('${folder.id}', '${folder.name}')">✏️</button>
-                    <button class="btn btn-outline-danger btn-sm px-2" onclick="clinicManager.deleteFolderById('${folder.id}', '${folder.name}')">🗑️</button>
+                    <button class="btn btn-outline-light btn-sm px-2" onclick="clinicManager.openFolder('${folder.webViewLink}')" title="Ver en Drive">📂</button>
+                    <button class="btn btn-outline-warning btn-sm px-2" onclick="clinicManager.editIntensity('${folder.id}', '${folder.name}')" title="Editar Prioridad">✏️</button>
+                    <button class="btn btn-outline-danger btn-sm px-2" onclick="clinicManager.deleteFolderById('${folder.id}', '${folder.name}')" title="Eliminar">🗑️</button>
                 </div>
             `;
             listContainer.appendChild(div);
             this.countVideos(folder.id);
         });
+    }
+
+    async handleFileUpload(file, folderId, folderName) {
+        // Validar que sea video
+        if (!file.type.startsWith('video/')) {
+            alert('⚠️ Solo se permiten archivos de video (MP4, WEBM, etc).');
+            return;
+        }
+
+        // Referencia visual a la tarjeta
+        const card = document.getElementById(`folder-card-${folderId}`);
+        const countLabel = document.getElementById(`count-${folderId}`);
+        const originalText = countLabel.innerText;
+
+        // Mostrar estado "Subiendo"
+        if(card) {
+            // Creamos un indicador visual temporal
+            const uploadingBadge = document.createElement('div');
+            uploadingBadge.className = 'uploading-overlay';
+            uploadingBadge.innerText = '⏳ Subiendo 0%...';
+            uploadingBadge.id = `upload-badge-${folderId}`;
+            card.appendChild(uploadingBadge);
+        }
+
+        try {
+            console.log(`Iniciando subida de ${file.name} a ${folderName}...`);
+
+            // 1. Preparar Metadata (JSON) + Archivo (Blob)
+            const metadata = {
+                name: file.name,
+                parents: [folderId] // ID de la carpeta destino (¡Clave!)
+            };
+
+            const formData = new FormData();
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            formData.append('file', file);
+
+            // 2. Usar XMLHttpRequest para poder medir el progreso (Fetch no tiene barra de progreso nativa fácil)
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', true);
+            xhr.setRequestHeader('Authorization', `Bearer ${this.accessToken}`);
+
+            // Evento de Progreso
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    const badge = document.getElementById(`upload-badge-${folderId}`);
+                    if(badge) badge.innerText = `⏳ Subiendo ${percentComplete}%`;
+                }
+            };
+
+            // Evento Completado
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    // Éxito
+                    const badge = document.getElementById(`upload-badge-${folderId}`);
+                    if(badge) {
+                        badge.style.color = '#198754'; // Verde
+                        badge.innerText = '✅ ¡Listo!';
+                        setTimeout(() => badge.remove(), 2000);
+                    }
+                    // Actualizar contador
+                    this.countVideos(folderId);
+                } else {
+                    console.error('Error Drive:', xhr.response);
+                    alert('Error al subir el video. Revisa la consola.');
+                    document.getElementById(`upload-badge-${folderId}`)?.remove();
+                }
+            };
+
+            xhr.onerror = () => {
+                alert('Error de red al subir el video.');
+                document.getElementById(`upload-badge-${folderId}`)?.remove();
+            };
+
+            // Enviar
+            xhr.send(formData);
+
+        } catch (error) {
+            console.error(error);
+            alert("Ocurrió un error inesperado.");
+            document.getElementById(`upload-badge-${folderId}`)?.remove();
+        }
     }
 
     async loadDashboard() {
@@ -265,7 +380,7 @@ class ClinicManager {
         const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
         
         if (checkboxes.length === 0) {
-            alert("⚠️ Por favor selecciona al menos una carpeta para armar la playlist.");
+            alert("⚠️Por favor selecciona al menos una carpeta para armar la playlist.");
             return;
         }
 
