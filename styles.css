@@ -114,7 +114,7 @@ body, html {
 
 .video-fade-out {
     opacity: 0 !important;
-    transition: opacity 1s ease-out;
+    transition: opacity 0.5s ease-out;
 }
 
 .video-vignette {

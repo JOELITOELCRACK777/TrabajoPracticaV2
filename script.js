@@ -72,7 +72,7 @@ class ClinicManager {
                 },
             });
         } else {
-            setTimeout(() => this.initGoogleAuth(), 1000);
+            setTimeout(() => this.initGoogleAuth(), 500);
             return;
         }
 
@@ -527,28 +527,36 @@ class ClinicManager {
 
 class VideoPlayer {
     constructor() {
-    this.videoElement = document.getElementById('main-player');
-    this.rootFolderId = null;
-    this.fadeStarted = false;
-    this.audioFadeStarted = false;
-    this.audioFadeInterval = null;
-    this.isLoading = false; 
-    this.lastFolderId = null;
-    
-    this.folders = { alta: [], media: [], baja: [] };
-    this.shuffledQueues = {}; 
-    this.currentObjectUrl = null;
+        this.videoElement = document.getElementById('main-player');
+        this.rootFolderId = null;
+        
+        // Estado de reproducción
+        this.fadeStarted = false;
+        this.audioFadeStarted = false;
+        this.audioFadeInterval = null;
+        this.isLoading = false; 
+        
+        // Control de Lógica
+        this.lastFolderId = null; // Para intentar no repetir carpeta
+        this.playedHistory = new Set(); // EL CEMENTERIO DE VIDEOS (IDs ya vistos)
+        this.videoCache = {}; // Guardamos la lista de videos para no pedir a Drive a cada rato
+        
+        this.folders = { alta: [], media: [], baja: [] };
+        this.allowedFolderIds = null;
+        this.currentObjectUrl = null;
 
-    if (this.videoElement) {
-        this.videoElement.onended = () => this.onVideoEnded();
-        this.videoElement.onerror = () => {
-            console.error("❌ Error de reproducción, recuperando...");
-            this.resetFlags();
-            setTimeout(() => this.playNextCycle(), 1000);
-        };
+        if (this.videoElement) {
+            this.videoElement.onended = () => this.onVideoEnded();
+            this.videoElement.onerror = () => {
+                console.error("❌ Error playback, recuperando...");
+                this.resetFlags();
+                setTimeout(() => this.playNextCycle(), 2000);
+            };
+        }
+        
+        // Tiempos para disparar prioridades
+        this.lastPriorityUpdate = { alta: Date.now(), media: Date.now() };
     }
-    this.lastPriorityUpdate = { alta: Date.now(), media: Date.now() };
-}
 
     resetFlags() {
         this.fadeStarted = false;
@@ -558,15 +566,13 @@ class VideoPlayer {
             clearInterval(this.audioFadeInterval);
             this.audioFadeInterval = null;
         }
-        if (this.videoElement) {
-            this.videoElement.volume = 1;
-        }
+        if (this.videoElement) this.videoElement.volume = 1;
     }
 
     onVideoEnded() {
         if (this.fadeStarted) return;
         this.fadeStarted = true;
-        console.log("🌓 Video terminado, iniciando fade-out suave...");
+        console.log("adieu... video terminado.");
         
         if (!this.audioFadeStarted) {
             this.audioFadeStarted = true;
@@ -574,16 +580,12 @@ class VideoPlayer {
         }
         
         this.videoElement.classList.add('video-fade-out');
-        
         setTimeout(() => this.playNextCycle(), 4000);
     }
 
     fadeOutAudio(duration) {
         if (!this.videoElement) return;
-        
-        if (this.audioFadeInterval) {
-            clearInterval(this.audioFadeInterval);
-        }
+        if (this.audioFadeInterval) clearInterval(this.audioFadeInterval);
         
         const startVolume = this.videoElement.volume;
         const startTime = Date.now();
@@ -591,13 +593,11 @@ class VideoPlayer {
         this.audioFadeInterval = setInterval(() => {
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / (duration * 1000), 1);
-            
             const easeOut = 1 - Math.pow(1 - progress, 3);
-            this.videoElement.volume = startVolume * (1 - easeOut);
+            this.videoElement.volume = Math.max(0, startVolume * (1 - easeOut));
             
             if (progress >= 1) {
                 clearInterval(this.audioFadeInterval);
-                this.audioFadeInterval = null;
                 this.videoElement.volume = 0;
             }
         }, 30);
@@ -606,23 +606,25 @@ class VideoPlayer {
     init(folderId, allowedIds = null) {
         this.rootFolderId = folderId;
         this.allowedFolderIds = allowedIds; 
+        this.videoCache = {}; // Limpiamos caché al iniciar nueva sesión
+        this.playedHistory.clear(); // Limpiamos historial
         this.scanFolders();
     }
+
     async scanFolders() {
         try {
             const q = `'${this.rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
             const headers = (window.clinicManager && window.clinicManager.accessToken) ? { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } : {};
+            
             const res = await fetch(url, { headers });
             const data = await res.json();
 
             this.folders = { alta: [], media: [], baja: [] };
-
             let foldersToProcess = data.files || [];
 
             if (this.allowedFolderIds && this.allowedFolderIds.length > 0) {
                 foldersToProcess = foldersToProcess.filter(f => this.allowedFolderIds.includes(f.id));
-                console.log("🎯 Reproduciendo solo selección:", this.allowedFolderIds.length, "carpetas.");
             }
 
             foldersToProcess.forEach(f => {
@@ -632,121 +634,166 @@ class VideoPlayer {
                 else this.folders.baja.push(f.id);
             });
 
-            console.log("📂 Sistema organizado:", this.folders);
+            console.log("📂 Estructura:", this.folders);
             this.playNextCycle(); 
         } catch (e) {
             console.error("Error scan:", e);
+            setTimeout(() => this.playNextCycle(), 5000); // Reintentar si falla
         }
     }
 
     async playNextCycle() {
-    if (this.isLoading) return;
-    this.isLoading = true;
+        if (this.isLoading) return;
+        this.isLoading = true;
 
-    const now = Date.now();
-    let targetFolderId = null;
+        const now = Date.now();
+        let targetFolderId = null;
 
-    if (this.folders.alta.length > 0 && (now - this.lastPriorityUpdate.alta >= 300000)) {
-        targetFolderId = this.folders.alta[Math.floor(Math.random() * this.folders.alta.length)];
-        this.lastPriorityUpdate.alta = now;
-    } 
-    else if (this.folders.media.length > 0 && (now - this.lastPriorityUpdate.media >= 480000)) {
-        targetFolderId = this.folders.media[Math.floor(Math.random() * this.folders.media.length)];
-        this.lastPriorityUpdate.media = now;
-    } 
-    else {
-        let pool = [...this.folders.baja];
-        if (pool.length === 0) pool = [...this.folders.media, ...this.folders.alta];
-
-        if (pool.length > 1) {
-            pool = pool.filter(id => id !== this.lastFolderId);
+        // 1. Lógica de Prioridad (Alta > Media > Baja)
+        if (this.folders.alta.length > 0 && (now - this.lastPriorityUpdate.alta >= 300000)) { // 5 min
+            targetFolderId = this.getRandomFolder(this.folders.alta);
+            if (targetFolderId) this.lastPriorityUpdate.alta = now;
+        } 
+        else if (this.folders.media.length > 0 && (now - this.lastPriorityUpdate.media >= 480000)) { // 8 min
+            targetFolderId = this.getRandomFolder(this.folders.media);
+            if (targetFolderId) this.lastPriorityUpdate.media = now;
+        } 
+        else {
+            // Relleno (Baja, o lo que haya)
+            let pool = [...this.folders.baja];
+            if (pool.length === 0) pool = [...this.folders.media, ...this.folders.alta];
+            
+            // Intento básico de no repetir la MISMA carpeta consecutiva si hay más opciones
+            if (pool.length > 1 && this.lastFolderId) {
+                pool = pool.filter(id => id !== this.lastFolderId);
+            }
+            targetFolderId = this.getRandomFolder(pool);
         }
-        
-        targetFolderId = pool[Math.floor(Math.random() * pool.length)];
+
+        this.lastFolderId = targetFolderId;
+
+        if (targetFolderId) {
+            await this.loadVideoFromFolder(targetFolderId);
+        } else {
+            console.log("⚠️ No hay carpetas disponibles.");
+            this.isLoading = false;
+            setTimeout(() => this.playNextCycle(), 5000);
+        }
     }
 
-    this.lastFolderId = targetFolderId;
-
-    if (targetFolderId) {
-        this.loadVideoFromFolder(targetFolderId);
-    } else {
-        this.isLoading = false;
-    }
+    getRandomFolder(list) {
+        if (!list || list.length === 0) return null;
+        return list[Math.floor(Math.random() * list.length)];
     }
 
+    // --- AQUÍ ESTÁ LA NUEVA LÓGICA "NO REPEAT" ---
     async loadVideoFromFolder(folderId) {
         try {
-            if (!this.shuffledQueues[folderId] || this.shuffledQueues[folderId].length === 0) {
+            // 1. Verificar si tenemos los videos en caché, si no, buscar en Drive
+            if (!this.videoCache[folderId]) {
                 const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
                 const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
                 const headers = (window.clinicManager && window.clinicManager.accessToken) ? { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } : {};
+                
                 const res = await fetch(url, { headers });
                 const data = await res.json();
-
+                
                 if (!data.files || data.files.length === 0) {
-                    this.resetFlags();
-                    return this.playNextCycle();
+                    console.log(`Carpeta vacía: ${folderId}`);
+                    this.videoCache[folderId] = []; // Marcar como vacía para no re-consultar
+                    this.isLoading = false;
+                    return this.playNextCycle(); 
                 }
-
-                let videos = [...data.files];
-                for (let i = videos.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [videos[i], videos[j]] = [videos[j], videos[i]];
-                }
-                this.shuffledQueues[folderId] = videos;
+                
+                // Guardamos la lista original completa
+                this.videoCache[folderId] = data.files;
             }
 
-            const video = this.shuffledQueues[folderId].shift();
-
-            if (this.videoElement) {
-                this.videoElement.classList.add('video-fade-out');
-
-                setTimeout(async () => {
-                    try {
-                        this.videoElement.pause();
-                        this.videoElement.volume = 1;
-                        if (this.currentObjectUrl) {
-                            try { URL.revokeObjectURL(this.currentObjectUrl); } catch (e) {}
-                            this.currentObjectUrl = null;
-                        }
-
-                        this.videoElement.removeAttribute('src');
-                        this.videoElement.load();
-
-                        const videoSrc = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
-
-                        if (window.clinicManager && window.clinicManager.accessToken) {
-                            const mediaHeaders = { 'Authorization': `Bearer ${window.clinicManager.accessToken}` };
-                            const mediaRes = await fetch(videoSrc, { headers: mediaHeaders });
-                            if (mediaRes.ok) {
-                                const blob = await mediaRes.blob();
-                                const objectUrl = URL.createObjectURL(blob);
-                                this.currentObjectUrl = objectUrl;
-                                this.videoElement.src = objectUrl;
-                            } else {
-                                this.videoElement.src = videoSrc;
-                            }
-                        } else {
-                            this.videoElement.src = videoSrc;
-                        }
-                        
-                        await this.videoElement.play();
-                        this.videoElement.classList.remove('video-fade-out');
-                        console.log(`🎬 Jugando: ${video.name}`);
-                    } catch (e) {
-                        console.warn("Autoplay bloqueado, reintentando...");
-                        await this.videoElement.play().catch(err => console.error("Fallo total play", err));
-                        this.videoElement.classList.remove('video-fade-out');
-                    } finally {
-                        this.resetFlags();
-                    }
-                }, 200); 
+            const allVideos = this.videoCache[folderId];
+            if (allVideos.length === 0) {
+                this.isLoading = false;
+                return this.playNextCycle();
             }
+
+            // 2. FILTRADO: Buscar videos que NO estén en el historial
+            let candidates = allVideos.filter(v => !this.playedHistory.has(v.id));
+
+            // 3. ¿SE ACABARON? (El caso de los 2 videos)
+            if (candidates.length === 0) {
+                console.log("♻️ Ciclo completo en carpeta. Reiniciando historial local.");
+                // Borramos del historial SOLO los videos de esta carpeta para que vuelvan a ser elegibles
+                allVideos.forEach(v => this.playedHistory.delete(v.id));
+                // Ahora todos son candidatos de nuevo
+                candidates = [...allVideos];
+            }
+
+            // 4. Seleccionar uno al azar de los candidatos
+            const selectedVideo = candidates[Math.floor(Math.random() * candidates.length)];
+            
+            // 5. Marcar como visto (METER AL HISTORIAL)
+            this.playedHistory.add(selectedVideo.id);
+
+            // 6. Reproducir
+            await this.playVideoFile(selectedVideo);
+
         } catch (error) {
-            console.error("Error en carga:", error);
+            console.error("Error cargando video:", error);
             this.resetFlags();
-            if(this.videoElement) this.videoElement.classList.remove('video-fade-out');
-            setTimeout(() => this.playNextCycle(), 3000);
+            setTimeout(() => this.playNextCycle(), 2000);
+        }
+    }
+
+    async playVideoFile(video) {
+        if (!this.videoElement) return;
+
+        // Fade Out visual antes de cambiar
+        this.videoElement.classList.add('video-fade-out');
+
+        // Pequeña pausa para transición suave
+        await new Promise(r => setTimeout(r, 500));
+
+        try {
+            this.videoElement.pause();
+            this.videoElement.volume = 1;
+            
+            // Liberar memoria previa
+            if (this.currentObjectUrl) {
+                URL.revokeObjectURL(this.currentObjectUrl);
+                this.currentObjectUrl = null;
+            }
+
+            this.videoElement.removeAttribute('src');
+            this.videoElement.load();
+
+            const videoUrl = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
+
+            // Intentar cargar como Blob (mejor rendimiento/buffer)
+            if (window.clinicManager && window.clinicManager.accessToken) {
+                const res = await fetch(videoUrl, { headers: { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } });
+                if (res.ok) {
+                    const blob = await res.blob();
+                    this.currentObjectUrl = URL.createObjectURL(blob);
+                    this.videoElement.src = this.currentObjectUrl;
+                } else {
+                    this.videoElement.src = videoUrl; // Fallback
+                }
+            } else {
+                this.videoElement.src = videoUrl;
+            }
+
+            await this.videoElement.play();
+            this.videoElement.classList.remove('video-fade-out');
+            console.log(`🎬 PLAY: ${video.name}`);
+            
+            // Flags listas para el final del video
+            this.resetFlags();
+
+        } catch (e) {
+            console.warn("Autoplay error:", e);
+            // Intentar recuperar forzando play o saltando
+            this.videoElement.classList.remove('video-fade-out');
+            this.resetFlags();
+            this.playNextCycle();
         }
     }
 }
