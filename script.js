@@ -10,7 +10,6 @@ class ClinicManager {
     constructor(playerInstance) {
         this.player = playerInstance;
         
-        // Estado
         this.selectedClinicName = null;
         this.selectedFolderId = null;
         this.accessToken = null;
@@ -18,21 +17,19 @@ class ClinicManager {
 
         this.allFolders = [];
 
-        // Referencias DOM
         this.containerClinics = document.getElementById('clinics-container');
         this.menuOverlay = document.getElementById('clinic-menu');
         this.clinicTitle = document.getElementById('clinic-title-display');
 
-        // Inicializar Auth y Carga
         this.initGoogleAuth();  
     }
 
     forceLogin() {
         console.warn("🔄 Token expirado. Solicitando nuevo inicio de sesión...");
-        localStorage.removeItem('google_access_token'); // Borramos el token viejo
+        localStorage.removeItem('google_access_token');
         this.accessToken = null;
         if (this.tokenClient) {
-            this.tokenClient.requestAccessToken(); // Abre la ventana de Google
+            this.tokenClient.requestAccessToken(); 
         }
     }
 
@@ -49,7 +46,6 @@ class ClinicManager {
             </div>
         `;
 
-        // Al hacer clic, pedimos el token
         document.getElementById('btn-login-drive').onclick = () => {
             if (this.tokenClient) {
                 this.tokenClient.requestAccessToken();
@@ -57,75 +53,60 @@ class ClinicManager {
         };
     }
 
-    // --- A. AUTENTICACIÓN GOOGLE (Igual que antes) ---
     initGoogleAuth() {
-        // 1. Configuración del Cliente de Google (Igual que antes)
         if (window.google && window.google.accounts) {
             this.tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CONFIG.clientId,
                 scope: 'https://www.googleapis.com/auth/drive',
                 callback: (tokenResponse) => {
                     if (tokenResponse && tokenResponse.access_token) {
-                        // Guardamos el token nuevo
                         this.accessToken = tokenResponse.access_token;
                         localStorage.setItem('google_access_token', tokenResponse.access_token);
                         
-                        // LÓGICA DE RECARGA:
-                        // Si estábamos en el dashboard, recargamos la lista de carpetas internas
                         if(document.getElementById('step-dashboard') && !document.getElementById('step-dashboard').classList.contains('d-none')){
                             this.loadDashboard();
                         } else {
-                            // Si estábamos en el inicio (pantalla de login), cargamos las clínicas
                             this.loadClinicsFromDrive();
                         }
                     }
                 },
             });
         } else {
-            // Reintento si la librería no cargó
             setTimeout(() => this.initGoogleAuth(), 1000);
             return;
         }
 
-        // 2. VERIFICACIÓN INICIAL (Esto es lo nuevo)
         const savedToken = localStorage.getItem('google_access_token');
         
         if (savedToken) {
-            // A) Hay token guardado: Intentamos cargar directo
             console.log("✅ Token detectado. Intentando cargar...");
             this.accessToken = savedToken;
             this.loadClinicsFromDrive(); 
         } else {
-            // B) No hay token: Mostramos el botón de login
             console.warn("🔒 Sin sesión. Mostrando login.");
             this.renderLoginScreen();
         }
     }
 
-    // --- B. CARGA INICIAL ---
     async loadClinicsFromDrive() {
         try {
-            // Consulta a la API
             const q = `'${CONFIG.masterFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&key=${CONFIG.apiKey}`;
             
-            // [CRÍTICO] Añadimos el Header de Autorización si existe el token
             const headers = this.accessToken ? { 'Authorization': `Bearer ${this.accessToken}` } : {};
 
             const response = await fetch(url, { headers });
 
-            // [NUEVO] Si el token venció (Error 401) o no tiene permiso (403)
             if (response.status === 401 || response.status === 403) {
                 console.warn("🚫 Token vencido o inválido. Volviendo al login...");
-                localStorage.removeItem('google_access_token'); // Borramos el token malo
+                localStorage.removeItem('google_access_token'); 
                 this.accessToken = null;
-                this.renderLoginScreen(); // Mostramos el botón otra vez
-                return; // Cortamos la ejecución aquí
+                this.renderLoginScreen(); 
+                return; 
             }
 
             const data = await response.json();
             
-            // Renderizado de botones (Tu lógica original)
             if (this.containerClinics) this.containerClinics.innerHTML = '';
             
             if (data.files) {
@@ -142,12 +123,10 @@ class ClinicManager {
 
         } catch (error) { 
             console.error("Error cargando clínicas", error);
-            // Opcional: Mostrar mensaje de error en pantalla
             if(this.containerClinics) this.containerClinics.innerHTML = '<div class="text-danger">Error de conexión</div>';
         }
     }
 
-    // --- C. NAVEGACIÓN ---
     selectClinic(name, id) {
         this.selectedClinicName = name;
         this.selectedFolderId = id;
@@ -156,12 +135,10 @@ class ClinicManager {
     }
 
     showStep(stepId) {
-        // Ocultar todos los pasos
         ['step-select', 'step-decision', 'step-dashboard'].forEach(id => {
             const el = document.getElementById(id);
             if(el) el.classList.add('d-none');
         });
-        // Mostrar el deseado
         const target = document.getElementById(stepId);
         if(target) target.classList.remove('d-none');
     }
@@ -215,14 +192,9 @@ class ClinicManager {
                 </div>
             `;
             listContainer.appendChild(div);
-            // Calculamos videos en segundo plano
             this.countVideos(folder.id);
         });
     }
-
-    // ==========================================
-    // D. DASHBOARD INTELIGENTE (NUEVO CÓDIGO)
-    // ==========================================
 
     async loadDashboard() {
         if (!this.accessToken) { this.tokenClient.requestAccessToken(); return; }
@@ -233,16 +205,14 @@ class ClinicManager {
         const listContainer = document.getElementById('folders-list');
         listContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info small"></div></div>';
 
-        // --- INYECCIÓN DE UI (Buscador + Botón) ---
+
         let actionArea = document.getElementById('dashboard-actions-dynamic');
         
-        // Si no existe el área de acciones, la creamos
         if(!actionArea) {
              actionArea = document.createElement('div');
              actionArea.id = 'dashboard-actions-dynamic';
              actionArea.className = 'mb-3';
              
-             // HTML del Buscador y Botón
              actionArea.innerHTML = `
                 <div class="input-group mb-2">
                     <span class="input-group-text bg-dark text-white border-secondary">🔍</span>
@@ -256,24 +226,20 @@ class ClinicManager {
              `;
              listContainer.parentNode.insertBefore(actionArea, listContainer);
 
-             // --- LÓGICA DE BÚSQUEDA CORREGIDA ---
              const searchInput = document.getElementById('folder-search-input');
              
              searchInput.addEventListener('input', (e) => {
                  const text = e.target.value.toUpperCase().trim();
                  
-                 // Si el input está vacío, mostramos todo
                  if (text === "") {
                      this.renderFolderList(this.allFolders);
                      return;
                  }
 
-                 // Filtramos si el nombre INCLUYE el texto (ej: "ODO" encuentra "CSJODO")
                  const filtered = this.allFolders.filter(f => f.name.toUpperCase().includes(text));
                  this.renderFolderList(filtered);
              });
         }
-        // ------------------------------------------
 
         try {
             const q = `'${this.selectedFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
@@ -287,7 +253,6 @@ class ClinicManager {
             this.allFolders = data.files || [];
             this.allFolders.sort((a, b) => a.name.localeCompare(b.name));
 
-            // Renderizamos la lista completa al inicio
             this.renderFolderList(this.allFolders);
 
         } catch (e) {
@@ -297,49 +262,39 @@ class ClinicManager {
     }
 
     playSelectedFolders() {
-        // 1. Buscar todos los checkboxes marcados
         const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
         
-        // 2. Validación
         if (checkboxes.length === 0) {
             alert("⚠️ Por favor selecciona al menos una carpeta para armar la playlist.");
             return;
         }
 
-        // 3. Extraer los IDs
         const selectedIds = Array.from(checkboxes).map(cb => cb.value);
 
-        // 4. Iniciar el Player con la "Lista Blanca"
         console.log("Armando playlist con IDs:", selectedIds);
         
-        this.menuOverlay.classList.add('slide-up'); // Cerrar menú
-        this.player.init(this.selectedFolderId, selectedIds); // Pasamos los IDs al player
+        this.menuOverlay.classList.add('slide-up'); 
+        this.player.init(this.selectedFolderId, selectedIds); 
     }
 
     openFolder(link) {
         if(link) window.open(link, '_blank');
     }
 
-    // 2. Editar Intensidad (Renombrar)
     async editIntensity(id, oldName) {
-        // Obtenemos la base del nombre (Todo menos la última letra)
         const baseName = oldName.slice(0, -1); 
         const currentInt = oldName.slice(-1);
 
-        // Pedimos la nueva letra
         const newInt = prompt(`Cambiar prioridad de "${oldName}"\n\nEscribe A (Alta), M (Media) o B (Baja):`, currentInt);
         
-        // Validación básica
-        if (!newInt) return; // Cancelado
+        if (!newInt) return; 
         const letter = newInt.toUpperCase().trim();
         if (!['A', 'M', 'B'].includes(letter)) return alert("⚠️ Letra inválida. Usa solo A, M o B.");
-        if (letter === currentInt) return; // Es la misma
+        if (letter === currentInt) return; 
 
         const newName = baseName + letter;
 
-        // Llamada a la API para renombrar
         try {
-            // UI Feedback visual rápido (opcional, pero mejora UX)
             document.body.style.cursor = 'wait';
             
             const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
@@ -352,7 +307,6 @@ class ClinicManager {
             });
 
             if (res.ok) {
-                // Recargamos el dashboard para ver el cambio
                 await this.loadDashboard();
             } else {
                 alert("Error al renombrar en Drive.");
@@ -365,27 +319,23 @@ class ClinicManager {
         }
     }
 
-    // Generador de Código en Tiempo Real
     updatePreview() {
         const topic = document.getElementById('new-topic').value;
         const idRaw = document.getElementById('new-id').value;
         const intensity = document.querySelector('input[name="intensity-btn"]:checked').value;
 
-        // Prefijo: Primeras 3 letras de la clínica (o GEN si falla)
         let prefix = "GEN";
         if (this.selectedClinicName) {
-            // Elimina espacios y coge 3 letras mayúsculas
             prefix = this.selectedClinicName.replace(/\s+/g, '').substring(0, 3).toUpperCase();
         }
 
-        const id = idRaw.padStart(2, '0'); // "1" -> "01"
+        const id = idRaw.padStart(2, '0');
         const code = `${prefix}${topic}${id}${intensity}`;
 
         document.getElementById('code-preview').innerText = code;
         return code;
     }
 
-    // Crear Carpeta (API)
     async createFolderFromUI() {
         const folderName = this.updatePreview();
         const btn = document.querySelector('.creation-panel button');
@@ -409,12 +359,10 @@ class ClinicManager {
                 })
             });
 
-            // --- CAMBIO IMPORTANTE AQUÍ ---
             if (res.status === 401) { 
                 this.forceLogin(); 
                 return; 
             }
-            // -----------------------------
 
             if (res.ok) {
                 await this.loadDashboard();
@@ -432,7 +380,6 @@ class ClinicManager {
         }
     }
 
-    // Eliminar Carpeta (API)
     async deleteFolderById(folderId, name) {
         if(!confirm(`¿Eliminar carpeta "${name}" y sus videos?`)) return;
 
@@ -450,7 +397,6 @@ class ClinicManager {
         } catch (e) { console.error(e); }
     }
 
-    // Helper: Contar videos para mostrar en dashboard
     async countVideos(folderId) {
         try {
             const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
@@ -460,13 +406,10 @@ class ClinicManager {
             
             const countEl = document.getElementById(`count-${folderId}`);
             if(countEl) countEl.innerText = `${data.files ? data.files.length : 0} videos`;
-        } catch (e) { /* silent fail */ }
+        } catch (e) { }
     }
 }
 
-// ==========================================
-// 3. REPRODUCTOR Y UTILIDADES
-// ==========================================
 class VideoPlayer {
     constructor() {
     this.videoElement = document.getElementById('main-player');
@@ -482,9 +425,7 @@ class VideoPlayer {
     this.currentObjectUrl = null;
 
     if (this.videoElement) {
-        // Evento cuando el video termina naturalmente
         this.videoElement.onended = () => this.onVideoEnded();
-        // Si el video falla, desbloqueamos y saltamos al siguiente
         this.videoElement.onerror = () => {
             console.error("❌ Error de reproducción, recuperando...");
             this.resetFlags();
@@ -494,17 +435,14 @@ class VideoPlayer {
     this.lastPriorityUpdate = { alta: Date.now(), media: Date.now() };
 }
 
-    // Función auxiliar para limpiar estados
     resetFlags() {
         this.fadeStarted = false;
         this.audioFadeStarted = false;
         this.isLoading = false;
-        // Cancelar cualquier fade-out de audio en progreso
         if (this.audioFadeInterval) {
             clearInterval(this.audioFadeInterval);
             this.audioFadeInterval = null;
         }
-        // Restaurar volumen a máximo
         if (this.videoElement) {
             this.videoElement.volume = 1;
         }
@@ -515,23 +453,19 @@ class VideoPlayer {
         this.fadeStarted = true;
         console.log("🌓 Video terminado, iniciando fade-out suave...");
         
-        // Iniciamos el fundido de audio (fade-out suave de 4 segundos)
         if (!this.audioFadeStarted) {
             this.audioFadeStarted = true;
-            this.fadeOutAudio(4); // 4 segundos de fade-out muy suave
+            this.fadeOutAudio(4); 
         }
         
-        // Iniciamos el fundido negro del video
         this.videoElement.classList.add('video-fade-out');
         
-        // Después de que termine el fade-out, cargamos el siguiente
         setTimeout(() => this.playNextCycle(), 4000);
     }
 
     fadeOutAudio(duration) {
         if (!this.videoElement) return;
         
-        // Cancelar cualquier fade-out anterior
         if (this.audioFadeInterval) {
             clearInterval(this.audioFadeInterval);
         }
@@ -543,7 +477,6 @@ class VideoPlayer {
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / (duration * 1000), 1);
             
-            // Usar easing ease-out para un fade más suave al final
             const easeOut = 1 - Math.pow(1 - progress, 3);
             this.videoElement.volume = startVolume * (1 - easeOut);
             
@@ -557,7 +490,7 @@ class VideoPlayer {
 
     init(folderId, allowedIds = null) {
         this.rootFolderId = folderId;
-        this.allowedFolderIds = allowedIds; // Guardamos la selección
+        this.allowedFolderIds = allowedIds; 
         this.scanFolders();
     }
     async scanFolders() {
@@ -570,15 +503,12 @@ class VideoPlayer {
 
             this.folders = { alta: [], media: [], baja: [] };
 
-            // --- AQUÍ ESTÁ EL FILTRO NUEVO ---
             let foldersToProcess = data.files || [];
 
-            // Si el usuario seleccionó carpetas específicas, filtramos
             if (this.allowedFolderIds && this.allowedFolderIds.length > 0) {
                 foldersToProcess = foldersToProcess.filter(f => this.allowedFolderIds.includes(f.id));
                 console.log("🎯 Reproduciendo solo selección:", this.allowedFolderIds.length, "carpetas.");
             }
-            // ---------------------------------
 
             foldersToProcess.forEach(f => {
                 const name = f.name.toUpperCase();
@@ -588,14 +518,13 @@ class VideoPlayer {
             });
 
             console.log("📂 Sistema organizado:", this.folders);
-            this.playNextCycle(); // Arranca el player
+            this.playNextCycle(); 
         } catch (e) {
             console.error("Error scan:", e);
         }
     }
 
     async playNextCycle() {
-    // Si ya estamos cargando un video, ignoramos cualquier otra orden
     if (this.isLoading) return;
     this.isLoading = true;
 
@@ -660,8 +589,7 @@ class VideoPlayer {
                 setTimeout(async () => {
                     try {
                         this.videoElement.pause();
-                        this.videoElement.volume = 1; // Restablecer volumen a máximo
-                        // Revoke previous blob URL if any
+                        this.videoElement.volume = 1;
                         if (this.currentObjectUrl) {
                             try { URL.revokeObjectURL(this.currentObjectUrl); } catch (e) {}
                             this.currentObjectUrl = null;
@@ -672,7 +600,6 @@ class VideoPlayer {
 
                         const videoSrc = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
 
-                        // Si hay token disponible, descargamos como blob y creamos un objectURL
                         if (window.clinicManager && window.clinicManager.accessToken) {
                             const mediaHeaders = { 'Authorization': `Bearer ${window.clinicManager.accessToken}` };
                             const mediaRes = await fetch(videoSrc, { headers: mediaHeaders });
@@ -682,7 +609,6 @@ class VideoPlayer {
                                 this.currentObjectUrl = objectUrl;
                                 this.videoElement.src = objectUrl;
                             } else {
-                                // Fallback: intentar con URL pública (si aplica)
                                 this.videoElement.src = videoSrc;
                             }
                         } else {
@@ -697,7 +623,6 @@ class VideoPlayer {
                         await this.videoElement.play().catch(err => console.error("Fallo total play", err));
                         this.videoElement.classList.remove('video-fade-out');
                     } finally {
-                        // PASE LO QUE PASE, desbloqueamos para el siguiente video
                         this.resetFlags();
                     }
                 }, 200); 
