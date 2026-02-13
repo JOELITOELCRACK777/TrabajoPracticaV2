@@ -7,140 +7,246 @@
     
     <link href="bootstrap/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;800&display=swap" rel="stylesheet">
-    
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
     <section id="clinic-menu" class="overlay-menu d-flex align-items-center justify-content-center">
-        <div class="menu-container text-center p-5">
+        <div class="menu-container text-center p-5 position-relative">
             
-    <div id="step-select" class="menu-step active">
-        <h1 class="mb-4">Bienvenido al Sistema Multimedia</h1>
-        <p class="mb-4 text-white-50">Cargando clínicas desde Google Drive...</p>
-        <div id="clinics-container" class="d-grid gap-3 col-8 mx-auto">
+            <div id="step-select" class="menu-step active">
+                <h1 class="mb-4">Bienvenido al Sistema Multimedia</h1>
+                <p class="mb-4 text-white-50">Cargando clínicas desde Google Drive...</p>
+                <div id="clinics-container" class="d-grid gap-3 col-8 mx-auto"></div>
             </div>
-    </div>
 
-    <div id="step-decision" class="menu-step d-none">
-        <h2 id="clinic-title-display" class="mb-4">Clínica Seleccionada</h2>
-        <div class="d-grid gap-3 col-8 mx-auto">
-            <button class="btn btn-success btn-lg py-3" onclick="clinicManager.activatePlaylist()">
-                ▶ REPRODUCIR
-            </button>
-            <button class="btn btn-outline-light btn-lg" onclick="clinicManager.loadDashboard()">
-                ⚙️ GESTIONAR CARPETAS
-            </button>
-        </div>
-        <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Volver</button>
-    </div>
+            <div id="step-decision" class="menu-step d-none">
+                <h2 id="clinic-title-display" class="mb-4">Clínica Seleccionada</h2>
+                <div class="d-grid gap-3 col-8 mx-auto">
+                    <button class="btn btn-success btn-lg py-3" onclick="clinicManager.loadDashboard()">
+                        ⚙️ GESTIONAR PLAYLIST SEMANAL
+                    </button>
+                </div>
+                <button class="btn btn-link text-white-50 mt-3" onclick="clinicManager.reset()">← Volver</button>
+            </div>
 
-    <div id="step-dashboard" class="menu-step d-none" style="text-align: left;">
-        
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="m-0 text-white"><span style="color:var(--accent-cyan)">✚</span> GESTIÓN DE CONTENIDOS</h5>
-            <button class="btn btn-sm btn-outline-light" onclick="clinicManager.backToDecision()">← Volver</button>
-        </div>
-
-        <div class="creation-panel p-3 mb-3">
-            <h6 class="text-white-50 mb-3" style="font-size: 0.8rem;">CREAR NUEVA CARPETA</h6>
-            
-            <div class="row g-2 align-items-end">
-                <div class="col-5">
-                    <label class="small text-muted mb-1">Especialidad</label>
-                    <select id="new-topic" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="clinicManager.updatePreview()">
-                        <option value="GEN">GENERAL</option>
-                        <option value="CARD">CARDIOLOGÍA</option>
-                        <option value="PED">PEDÍATRIA</option>
-                        <option value="URG">URGENCIAS</option>
-                        <option value="TRA">TRAUMATOLOGÍA</option>
-                        <option value="ODO">ODONTOLOGÍA</option>
-                        <option value="TUR">TURISMO</option>
-                        <option value="CORP">CORPORATIVO</option>
-                    </select>
+            <div id="step-dashboard" class="menu-step d-none" style="text-align: left;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="m-0 text-white"><span style="color:var(--accent-cyan)">✚</span> CONSTRUCTOR DE PLAYLIST</h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="clinicManager.backToDecision()">← Volver</button>
                 </div>
 
-                <div class="col-3">
-                    <label class="small text-muted mb-1">ID #</label>
-                    <input type="number" id="new-id" class="form-control form-control-sm bg-dark text-white border-secondary text-center" value="1" min="1" oninput="clinicManager.updatePreview()">
+                <div class="creation-panel p-3 mb-3">
+                    <h6 class="text-white-50 mb-3" style="font-size: 0.8rem;">CREAR NUEVA CARPETA</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-5">
+                            <label class="small text-muted mb-1">Especialidad</label>
+                            <select id="new-topic" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="clinicManager.updatePreview()">
+                                <option value="GEN">GENERAL</option>
+                                <option value="CARD">CARDIOLOGÍA</option>
+                                <option value="PED">PEDÍATRIA</option>
+                                <option value="URG">URGENCIAS</option>
+                                <option value="TRA">TRAUMATOLOGÍA</option>
+                                <option value="ODO">ODONTOLOGÍA</option>
+                                <option value="TUR">TURISMO</option>
+                                <option value="CORP">CORPORATIVO</option>
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <label class="small text-muted mb-1">ID #</label>
+                            <input type="number" id="new-id" class="form-control form-control-sm bg-dark text-white border-secondary text-center" value="1" min="1" oninput="clinicManager.updatePreview()">
+                        </div>
+                        <div class="col-4">
+                            <label class="small text-muted mb-1">Prioridad</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="intensity-btn" id="int-a" value="A" onchange="clinicManager.updatePreview()">
+                                <label class="btn btn-outline-danger btn-sm" for="int-a" title="Alta">A</label>
+                                <input type="radio" class="btn-check" name="intensity-btn" id="int-m" value="M" checked onchange="clinicManager.updatePreview()">
+                                <label class="btn btn-outline-warning btn-sm" for="int-m" title="Media">M</label>
+                                <input type="radio" class="btn-check" name="intensity-btn" id="int-b" value="B" onchange="clinicManager.updatePreview()">
+                                <label class="btn btn-outline-success btn-sm" for="int-b" title="Baja">B</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex justify-content-between align-items-center bg-black rounded p-2 border border-secondary">
+                        <div class="d-flex flex-column px-2">
+                            <span class="text-white-50" style="font-size:0.6rem">CÓDIGO:</span>
+                            <span id="code-preview" class="fw-bold text-info" style="letter-spacing: 1px;">---</span>
+                        </div>
+                        <button class="btn btn-info btn-sm fw-bold px-3" onclick="clinicManager.createFolderFromUI()">
+                            ✚ CREAR
+                        </button>
+                    </div>
                 </div>
 
-                <div class="col-4">
-                    <label class="small text-muted mb-1">Prioridad</label>
-                    <div class="btn-group w-100" role="group">
-                        <input type="radio" class="btn-check" name="intensity-btn" id="int-a" value="A" onchange="clinicManager.updatePreview()">
-                        <label class="btn btn-outline-danger btn-sm" for="int-a" title="Alta">A</label>
+                <div class="input-group mb-2">
+                    <span class="input-group-text bg-dark text-white border-secondary">🔍</span>
+                    <input type="text" id="folder-search-input" class="form-control bg-dark text-white border-secondary" placeholder="Buscar carpeta..." oninput="clinicManager.renderFolderList()">
+                </div>
 
-                        <input type="radio" class="btn-check" name="intensity-btn" id="int-m" value="M" checked onchange="clinicManager.updatePreview()">
-                        <label class="btn btn-outline-warning btn-sm" for="int-m" title="Media">M</label>
+                <div class="flex-grow-1" style="height: 250px; overflow-y: auto; padding-bottom: 20px;" id="folders-scroll-area">
+                    <div id="folders-list" class="d-grid gap-2"></div>
+                </div>
+            </div>
 
-                        <input type="radio" class="btn-check" name="intensity-btn" id="int-b" value="B" onchange="clinicManager.updatePreview()">
-                        <label class="btn btn-outline-success btn-sm" for="int-b" title="Baja">B</label>
+            <div id="step-playlist" class="menu-step d-none">
+                <div class="d-flex justify-content-between align-items-center mb-4 border-bottom border-secondary pb-3">
+                    <div class="text-start">
+                        <h4 class="m-0 text-white">📅 PROGRAMACIÓN DE PLAYLIST</h4>
+                        <small class="text-white-50">Organiza qué se verá en las pantallas</small>
+                    </div>
+                    <button class="btn btn-outline-light btn-sm" onclick="clinicManager.showStep('step-dashboard')">
+                        ← Volver a Selección
+                    </button>
+                </div>
+
+                <div class="row g-4 text-start">
+                    <div class="col-lg-5 border-end border-secondary">
+                        <h6 class="text-info fw-bold mb-3">1. CONFIGURAR CONTENIDO</h6>
+                        <div class="bg-dark p-3 rounded border border-secondary mb-3">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span class="text-white small">Selección Actual:</span>
+                                <span class="badge bg-primary" id="selected-count-badge">0 carpetas</span>
+                            </div>
+                            <div id="playlist-preview-list" style="max-height: 200px; overflow-y: auto; font-size: 0.85rem;" class="text-white-50"></div>
+                        </div>
+
+                        <div class="card bg-transparent border-secondary">
+                            <div class="card-header border-secondary bg-secondary bg-opacity-10 text-white small py-2">
+                                💾 Guardar esta combinación
+                            </div>
+                            <div class="card-body p-2">
+                                <div class="input-group input-group-sm mb-2">
+                                    <input type="text" id="playlist-name-input" class="form-control bg-dark text-white border-secondary" placeholder="Ej: TV Mañana...">
+                                    <button class="btn btn-success" type="button" onclick="scheduleManager.saveCurrentPlaylist()">Guardar</button>
+                                </div>
+                                <hr class="border-secondary my-2">
+                                <label class="text-white-50 small mb-1">Cargar Playlist Guardada:</label>
+                                <select id="saved-playlists-select" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="scheduleManager.loadPlaylist(this.value)">
+                                    <option value="">-- Seleccionar --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-7">
+                        <h6 class="text-warning fw-bold mb-3">2. PROGRAMAR EN CALENDARIO</h6>
+                        <div class="bg-dark p-3 rounded border border-secondary mb-4">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="text-white-50 small mb-1">Desde:</label>
+                                    <input type="date" id="date-start" class="form-control form-control-sm bg-black text-white border-secondary py-2">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="text-white-50 small mb-1">Hasta:</label>
+                                    <input type="date" id="date-end" class="form-control form-control-sm bg-black text-white border-secondary py-2">
+                                </div>
+                                <div class="col-md-4">
+                                    <button class="btn btn-warning btn-sm w-100 fw-bold py-2 shadow-sm" onclick="scheduleManager.addToSchedule()">✚ AGENDAR</button>
+                                </div>
+                            </div>
+                        </div>
+                        <h6 class="text-white small mb-2">📅 Programación Activa:</h6>
+                        <div id="schedule-list" class="list-group list-group-flush border-top border-secondary" style="max-height: 250px; overflow-y: auto;">
+                            <div class="text-center text-muted py-4 small">No hay programación definida.</div>
+                        </div>
+                        <div class="mt-4 pt-3 border-top border-secondary text-end">
+                            <button class="btn btn-primary btn-lg px-5 fw-bold shadow-lg" onclick="clinicManager.launchPlaylist()">▶ INICIAR TV</button>
+                        </div>
                     </div>
                 </div>
             </div>
-
-            <div class="mt-3 d-flex justify-content-between align-items-center bg-black rounded p-2 border border-secondary">
-                <div class="d-flex flex-column px-2">
-                    <span class="text-white-50" style="font-size:0.6rem">CÓDIGO:</span>
-                    <span id="code-preview" class="fw-bold text-info" style="letter-spacing: 1px;">---</span>
-                </div>
-                <button class="btn btn-info btn-sm fw-bold px-3" onclick="clinicManager.createFolderFromUI()">
-                    ✚ CREAR
-                </button>
-            </div>
+        </div> <div id="selection-bar" class="floating-bar">
+            <span id="selection-count" class="fw-bold">0</span> carpetas seleccionadas
+            <button class="btn btn-info btn-sm ms-3 fw-bold" onclick="clinicManager.showStep('step-playlist')">
+                PROGRAMAR PLAYLIST
+            </button>
         </div>
-
-        <div class="flex-grow-1" style="height: 250px; overflow-y: auto;" id="folders-scroll-area">
-            <h6 class="text-white-50 mb-2 sticky-top bg-black py-1" style="font-size: 0.8rem;">CARPETAS ACTIVAS</h6>
-            <div id="folders-list" class="d-grid gap-2">
-                </div>
-        </div>
-    </div>
-
-</div>
     </section>
 
     <div class="app d-flex">
-        
         <main class="player-section flex-grow-1">
             <video id="main-player" playsinline autoplay class="main-video" preload="auto"></video>
             <div class="video-vignette"></div>
         </main>
-
         <aside class="sidebar-right">
             <div class="container-fluid h-100 py-5 d-flex flex-column justify-content-between">
-                
                 <div class="brand-section text-center">
-                    <div>
-                        <img class="logo-clinica" src="img/logoclinica.png" width="50" height="50" alt="Logo">
-                    </div>
+                    <div><img class="logo-clinica" src="img/logoclinica.png" width="50" height="50" alt="Logo"></div>
                 </div>
-
                 <div style="font-family: 'Montserrat', sans-serif; font-size: 1.1rem; font-weight: 700; color: #ffffff; text-transform: uppercase; letter-spacing: 2px; margin-left: 40px; display: flex; align-items: center; gap: 8px; text-shadow: 0 0 15px rgba(13, 202, 240, 0.4);">
-    <span style="color: #0dcaf0; font-size: 1.2em; line-height: 1;">✚</span> CLÍNICA SAN JOSÉ
+                    <span style="color: #0dcaf0; font-size: 1.2em; line-height: 1;">✚</span> CLÍNICA SAN JOSÉ
                 </div>
-
                 <div class="time-section text-center">
                     <div id="hora" class="time-display">00:00</div>
                     <div id="fecha" class="date-display text-uppercase mt-2">-- / --</div>
                 </div>
-
                 <div class="weather-section text-center">
                     <span id="clima-icon" class="d-block mb-2">☀️</span>
                     <h2 id="temperatura" class="mb-0">--°C</h2>
                     <p id="ciudad" class="mb-3 opacity-75">ARICA, CHILE</p>
                     <div class="hospital-ticker border-top border-light border-opacity-10 pt-3 mt-3">
                         <p class="mb-0 text-white-50 x-small-text">SALUD</p>
-                        <p class="mb-0 text-white-50 x-small-text">Accesible, Confiable y Calida</p>
+                        <p class="mb-0 text-white-50 x-small-text">Accesible, Confiable y Cálida</p>
                     </div> 
                 </div>
-
             </div>
         </aside>
     </div>
-    
+
+    <div class="modal fade" id="folderContentModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div class="modal-content bg-dark border-secondary text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">📂 Contenido: <span id="modal-folder-name" class="text-info">...</span></h5>
+                <div>
+                    <input type="file" id="file-upload-input" accept="video/*,image/*" multiple style="display: none;" onchange="clinicManager.subirArchivoNuevo(this.files)">
+                    <button class="btn btn-warning btn-sm w-100 fw-bold px-0" onclick="document.getElementById('file-upload-input').click()">
+                        ✚ AÑADIR CONTENIDO
+                    </button>
+                </div>
+                <div id="upload-progress-container" class="bg-dark border-bottom border-secondary d-none">
+                <div class="p-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="small text-info fw-bold" id="upload-status">Subiendo archivos...</span>
+                        <span class="small text-white-50" id="upload-percentage">0%</span>
+                    </div>
+                    <div class="progress" style="height: 6px; background-color: rgba(255,255,255,0.1);">
+                        <div id="upload-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="modal-files-grid" class="row g-3"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    function gapiLoaded() {
+        console.log("🔧 Iniciando carga de GAPI desde HTML...");
+        gapi.load('client', async () => {
+            try {
+                // Inicializamos la API de Drive
+                await gapi.client.init({
+                    discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
+                });
+                console.log("🟢 GAPI (Google API) está lista y cargada.");
+            } catch (err) {
+                console.error("❌ Error al iniciar GAPI:", err);
+            }
+        });
+    }
+</script>
+    <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="script.js"></script>
+    <script src="script.js"></script>>
 </body>
 </html>

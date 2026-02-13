@@ -10,7 +10,7 @@
     --padding-std: 30px;
 }
 
-.logo-clinica{
+.logo-clinica {
     position: absolute;
     top: -40px;
     left: 50%;
@@ -61,6 +61,11 @@ body, html {
     box-shadow: 0 20px 50px rgba(0,0,0,0.5);
     width: 100%;
     max-width: 600px;
+    transition: max-width 0.5s ease-in-out;
+    max-height: 90vh; /* Evita que se salga de la pantalla */
+    overflow: hidden; 
+    display: flex;
+    flex-direction: column;
 }
 
 .btn-clinic {
@@ -127,7 +132,7 @@ body, html {
     pointer-events: none;
 }
 
-/* --- SIDEBAR RESTAURADO --- */
+/* --- SIDEBAR --- */
 .sidebar-right {
     background: linear-gradient(160deg, var(--clinic-blue-deep) 0%, var(--clinic-blue-mid) 100%);
     border-left: 1px solid rgba(255,255,255,0.15);
@@ -135,13 +140,11 @@ body, html {
     z-index: 10;
     overflow: hidden; 
     white-space: nowrap; 
-    width: var(--sidebar-width); /* Ancho fijo por defecto */
+    width: var(--sidebar-width);
     min-width: 300px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    
-    /* Animación original de aparecer/desaparecer (Cycle) */
     animation: pushCycle 90s infinite ease-in-out;
 }
 
@@ -156,14 +159,13 @@ body, html {
 /* LOGO */
 .brand-section {
     padding: var(--padding-std);
-    position: relative; /* para posicionar el logo de forma absoluta dentro */
-    height: 110px; /* espacio reservado para el logo sin empujar contenido */
+    position: relative;
+    height: 110px;
     display: flex;
     align-items: flex-start;
     justify-content: center;
 }
 
-/* Etiqueta/placa detrás del logo para mejorar contraste */
 .brand-section::before {
     content: '';
     position: absolute;
@@ -248,54 +250,31 @@ body, html {
     letter-spacing: 1px;
 }
 
-/* Ajustes pantallas gigantes */
 @media (min-width: 2000px) {
     :root { --sidebar-width: 500px; }
     .time-display { font-size: 7rem; }
     #temperatura { font-size: 4rem; }
 }
 
-#admin-code::placeholder {
-    color: rgba(255, 255, 255, 0.5) !important; /* Blanco semi-transparente */
-    opacity: 1; /* Necesario para Firefox */
-}
-
 #clinics-container {
-    max-height: 50vh;       /* Altura máxima: 50% de la pantalla */
-    overflow-y: auto;       /* Activa el scroll vertical si se pasa de altura */
-    padding-right: 10px;    /* Espacio para que la barra no tape el texto */
+    max-height: 50vh;
+    overflow-y: auto;
+    padding-right: 10px;
     margin-bottom: 20px;
 }
 
-/* Diseño de la barra de scroll (Estilo Médico/Dark) */
-#clinics-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-#clinics-container::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05); /* Fondo sutil */
-    border-radius: 4px;
-}
-
-#clinics-container::-webkit-scrollbar-thumb {
-    background: var(--accent-cyan); /* Tu color cyan corporativo */
-    border-radius: 4px;
-}
-
-#clinics-container::-webkit-scrollbar-thumb:hover {
-    background: #0bb5d8; /* Un poco más oscuro al pasar el mouse */
-}
+#clinics-container::-webkit-scrollbar { width: 8px; }
+#clinics-container::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+#clinics-container::-webkit-scrollbar-thumb { background: var(--accent-cyan); border-radius: 4px; }
+#clinics-container::-webkit-scrollbar-thumb:hover { background: #0bb5d8; }
 
 /* --- DASHBOARD STYLES --- */
-
-/* Panel de creación */
 .creation-panel {
     background: linear-gradient(145deg, #182029 0%, #0f1216 100%);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
 }
 
-/* Inputs y Selects */
 .form-select, .form-control {
     background-color: #111 !important;
     border: 1px solid #444 !important;
@@ -307,7 +286,6 @@ body, html {
     border-color: var(--accent-cyan) !important;
 }
 
-/* Lista de Carpetas */
 .folder-item {
     background: rgba(255, 255, 255, 0.03);
     border-left: 4px solid #555;
@@ -316,52 +294,35 @@ body, html {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    transition: background 0.2s;
+    transition: all 0.2s ease-in-out;
+    position: relative;
 }
 .folder-item:hover { background: rgba(255, 255, 255, 0.08); }
 
-/* Indicadores de Intensidad */
-.border-intensity-A { border-left-color: #dc3545 !important; } /* Rojo */
-.border-intensity-M { border-left-color: #ffc107 !important; } /* Amarillo */
-.border-intensity-B { border-left-color: #198754 !important; } /* Verde */
+.border-intensity-A { border-left-color: #dc3545 !important; }
+.border-intensity-M { border-left-color: #ffc107 !important; }
+.border-intensity-B { border-left-color: #198754 !important; }
 
-/* Scrollbar personalizado para el dashboard */
 #folders-scroll-area::-webkit-scrollbar { width: 5px; }
 #folders-scroll-area::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 
-/* Ajuste para el grupo de botones en la lista */
 .folder-item .btn-group .btn {
     border-radius: 0;
-    margin-left: -1px; /* Para unir los bordes */
+    margin-left: -1px;
     padding-top: 4px;
     padding-bottom: 4px;
 }
+.folder-item .btn-group .btn:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.folder-item .btn-group .btn:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 
-.folder-item .btn-group .btn:first-child {
-    border-top-left-radius: 4px;
-    border-bottom-left-radius: 4px;
-}
-
-.folder-item .btn-group .btn:last-child {
-    border-top-right-radius: 4px;
-    border-bottom-right-radius: 4px;
-}
-
-.folder-item {
-    transition: all 0.2s ease-in-out;
-    position: relative; /* Necesario para efectos */
-}
-
-/* Clase que se activa cuando arrastras un archivo encima */
 .drag-over {
-    border: 2px dashed var(--accent-cyan) !important; /* Borde discontinuo Cyan */
-    background-color: rgba(13, 202, 240, 0.15) !important; /* Fondo sutil */
-    transform: scale(1.02); /* Pequeño zoom */
+    border: 2px dashed var(--accent-cyan) !important;
+    background-color: rgba(13, 202, 240, 0.15) !important;
+    transform: scale(1.02);
     box-shadow: 0 0 15px rgba(13, 202, 240, 0.3);
     z-index: 10;
 }
 
-/* Indicador de carga (Spinner simple) */
 .uploading-overlay {
     position: absolute;
     right: 10px;
@@ -380,4 +341,276 @@ body, html {
     0% { opacity: 0.6; }
     50% { opacity: 1; }
     100% { opacity: 0.6; }
+}
+
+/* --- NUEVOS ESTILOS PARA PLAYLIST --- */
+.floating-bar {
+    position: fixed !important;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 500px;
+    background: rgba(13, 202, 240, 0.98); 
+    padding: 15px 25px; 
+    z-index: 20002 !important;
+    border-radius: 20px 20px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-bottom: none;
+
+    /* ANIMACIÓN DE SALIDA (Estado por defecto) */
+    bottom: -150px; 
+    opacity: 0;
+    transition: bottom 0.5s cubic-bezier(0.4, 0, 0.2, 1), 
+                opacity 0.4s ease-in;
+}
+
+.floating-bar.active { 
+    bottom: 0 !important; 
+    opacity: 1;
+    transition: bottom 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275), 
+                opacity 0.3s ease-out;
+}
+
+.playlist-item {
+    background: rgba(255,255,255,0.05);
+    border-left: 4px solid var(--accent-cyan);
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+.playlist-item:hover { 
+    background: rgba(255,255,255,0.1); 
+}
+
+/* Checkbox personalizado */
+.folder-checkbox {
+    background-color: #222;
+    border-color: #555;
+}
+.folder-checkbox:checked {
+    background-color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+}
+
+/* --- ESTILOS PARA LA VENTANA MODAL (POPUP) --- */
+
+/* 1. Hacemos que el nombre de la carpeta sea clickeable */
+.clickable-folder {
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    border: 1px solid transparent; /* Para que no salte al hacer hover */
+}
+
+.clickable-folder:hover {
+    background-color: rgba(13, 202, 240, 0.15); /* Fondo Cyan suave */
+    border-color: rgba(13, 202, 240, 0.3);
+}
+
+.clickable-folder:hover .fw-bold {
+    color: var(--accent-cyan) !important; /* Texto Cyan brillante */
+}
+
+/* 2. Tarjetas de los archivos (Videos/Fotos) dentro del modal */
+.file-thumbnail-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.file-thumbnail-card:hover {
+    transform: translateY(-5px);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--accent-cyan);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+
+.thumb-img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover; /* Recorta la imagen para que encaje bien */
+    background-color: #000;
+}
+
+/* 3. Etiquetas (VIDEO / FOTO) */
+.file-type-badge {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+    z-index: 2;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+.badge-video { background-color: rgba(220, 53, 69, 0.9); color: white; } /* Rojo */
+.badge-image { background-color: rgba(25, 135, 84, 0.9); color: white; } /* Verde */
+
+/* 4. Botón de Eliminar (La X pequeña) */
+.delete-file-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(0, 0, 0, 0.6);
+    border: none;
+    color: #fff;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s;
+    z-index: 2;
+}
+.delete-file-btn:hover { background: #dc3545; }
+
+.modal-backdrop {
+    z-index: 20000 !important; 
+}
+
+/* 2. La ventana misma (tiene que ser mayor que el backdrop) */
+.modal {
+    z-index: 20001 !important;
+}
+
+/* --- ESTILOS DEL GESTOR DE CALENDARIO --- */
+
+/* Item de la lista de programación */
+.schedule-item {
+    background-color: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background 0.2s;
+}
+
+.schedule-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.date-badge {
+    font-family: monospace;
+    font-size: 0.85rem;
+    background: rgba(13, 202, 240, 0.2);
+    color: var(--accent-cyan);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* Estilo para el input de fecha en modo oscuro */
+input[type="date"] {
+    color-scheme: dark; /* Hace que el calendario emergente sea oscuro en navegadores modernos */
+}
+
+#step-playlist .btn-warning {
+    white-space: nowrap !important;
+    min-width: 140px !important; /* Un poco más de espacio para el texto "+ AGENDAR" */
+    padding: 10px 15px !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 2. Arreglar los inputs de fecha que se ven cortados */
+input[type="date"] {
+    width: 100%;      /* Que ocupen todo su espacio disponible */
+    min-width: 130px; /* Que nunca sean más pequeños que esto */
+    cursor: pointer;
+}
+
+/* 3. Alinear el botón AGENDAR con los inputs */
+/* Esto asegura que el botón no quede flotando arriba o abajo */
+.align-items-end {
+    align-items: flex-end !important;
+}
+
+/* 4. Darle un poco de aire a los items de la lista de la izquierda */
+#playlist-preview-list div {
+    margin-bottom: 8px;
+}
+
+.menu-container.container-wide {
+    max-width: 1300px !important; 
+    width: 95vw !important; /* Esto obliga a usar casi todo el ancho de la pantalla */
+    transition: all 0.5s ease-in-out;
+}
+
+.container-wide .p-5 {
+    padding: 2rem !important;
+}
+
+#step-playlist input[type="date"] {
+    min-width: 140px; 
+    flex-shrink: 1; /* Permite que se achiquen un poco antes de romperse */
+}
+
+#step-playlist .row.g-2 {
+    display: flex;
+    flex-wrap: nowrap; /* Evita que el botón salte a otra línea o se encime */
+    align-items: flex-end;
+}
+
+#step-playlist {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* Mejora la visualización en la vista ancha */
+.menu-container.container-wide {
+    max-width: 1300px !important; 
+    width: 95vw !important;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Aseguramos que la barra siempre esté por encima de todo */
+.floating-bar {
+    position: fixed !important; /* Fixed para que flote sobre todo el viewport */
+    bottom: -120px; /* Un poco más abajo para asegurar que se esconda */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 500px;
+    background: rgba(13, 202, 240, 0.98); 
+    padding: 15px 25px; 
+    z-index: 20002 !important; /* Superior al Modal (20001) y al Overlay (9999) */
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border-radius: 20px 20px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-bottom: none;
+}
+
+.floating-bar.active {
+    bottom: 0 !important;
+}
+
+.floating-bar button {
+    background: #000000 !important; /* Negro total */
+    color: #ffffff !important;    /* Texto blanco */
+    border: 1px solid rgba(255,255,255,0.2);
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.floating-bar button:hover {
+    background: #222222 !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(0,0,0,0.4);
 }
