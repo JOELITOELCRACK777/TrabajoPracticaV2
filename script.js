@@ -7,51 +7,157 @@ const CONFIG = {
 
 class ScheduleManager {
     constructor() {
-        console.log("Gestor de Calendario iniciado.");
+        // 1. Cargar datos guardados o iniciar vacío
+        this.playlists = JSON.parse(localStorage.getItem('clinic_playlists')) || [];
+        this.currentPlaylistId = null; // Para saber qué está sonando ahora
+
+        // 2. Iniciar el "reloj" que revisa la agenda cada 60 segundos
+        // Así, si cambia el día a medianoche, la playlist se actualiza sola.
+        setInterval(() => this.checkSchedule(), 60000);
     }
 
-    openConfig() {
-        // 1. Obtener checkboxes marcados
-        const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    /**
+     * Guarda una nueva playlist y verifica si debe activarse ya.
+     * @param {string} name - Nombre de la playlist
+     * @param {string} start - Fecha inicio (YYYY-MM-DD)
+     * @param {string} end - Fecha fin (YYYY-MM-DD)
+     * @param {Array} folderIds - Lista de IDs de carpetas seleccionadas
+     */
+    savePlaylist(name, start, end, folderIds) {
+        if (!name || !start || !end || folderIds.length === 0) {
+            alert("⚠️ Faltan datos (nombre, fechas o carpetas).");
+            return false;
+        }
+
+        const newPlaylist = {
+            id: Date.now().toString(), // ID único
+            name: name,
+            start: start,
+            end: end,
+            folders: folderIds,
+            createdAt: new Date().toISOString()
+        };
+
+        // Guardamos en la lista y en memoria del navegador
+        this.playlists.push(newPlaylist);
+        this.persist();
+
+        console.log(`💾 Playlist guardada: ${name} (${folderIds.length} carpetas)`);
+        alert("✅ Playlist programada correctamente.");
+
+        // Verificamos inmediatamente por si la fecha es HOY
+        this.checkSchedule();
+        return true;
+    }
+
+    /**
+     * Borrar una playlist por ID
+     */
+    deletePlaylist(id) {
+        this.playlists = this.playlists.filter(p => p.id !== id);
+        this.persist();
+        this.checkSchedule(); // Re-verificar estado
+    }
+
+    loadPlaylist(id) {
+        if (!id) return; // Si eligió "-- Seleccionar --" no hacemos nada
+
+        // 1. Buscar la playlist en la memoria
+        const playlist = this.playlists.find(p => p.id === id);
         
-        if(checkboxes.length === 0) {
-            alert("Selecciona al menos una carpeta para continuar.");
+        if (!playlist) {
+            alert("Error: No se encontró la playlist.");
             return;
         }
 
-        // 2. Llenar lista visual
-        const previewList = document.getElementById('playlist-preview-list');
-        if(previewList) {
-            previewList.innerHTML = ''; 
-            checkboxes.forEach(cb => {
-                const name = cb.getAttribute('data-name') || "Carpeta " + cb.value;
-                previewList.innerHTML += `
-                    <div class="d-flex justify-content-between border-bottom border-secondary py-1">
-                        <span class="text-white small">📂 ${name}</span>
-                        <span class="text-success">✔</span>
-                    </div>`;
-            });
+        // 2. Rellenar los campos visuales
+        document.getElementById('playlist-name-input').value = playlist.name;
+        document.getElementById('date-start').value = playlist.start;
+        document.getElementById('date-end').value = playlist.end;
+
+        // 3. (Opcional) Si quieres que también marque los checkboxes de las carpetas:
+        // Primero desmarcamos todo
+        document.querySelectorAll('.folder-checkbox').forEach(cb => cb.checked = false);
+        
+        // Marcamos los que están en la playlist
+        playlist.folders.forEach(folderId => {
+            const checkbox = document.querySelector(`.folder-checkbox[value="${folderId}"]`);
+            if (checkbox) checkbox.checked = true;
+        });
+
+        // Actualizamos el contador visual si existe la función
+        if (typeof openScheduleManager === 'function') {
+             // Esto es un truco para refrescar la vista de "seleccionados"
+             // Simplemente actualizamos la variable global
+             window.currentPlaylistSelection = playlist.folders;
+             const badge = document.getElementById('selected-count-badge');
+             if(badge) badge.innerText = `${playlist.folders.length} carpetas (Cargado)`;
         }
 
-        // 3. Actualizar contador
-        const badge = document.getElementById('selected-count-badge');
-        if(badge) badge.innerText = checkboxes.length + " carpetas";
-
-        // 4. Cambiar pantalla
-        const dash = document.getElementById('step-dashboard');
-        const play = document.getElementById('step-playlist');
-        const bar = document.getElementById('selection-bar');
-
-        if(dash) dash.classList.add('d-none');
-        if(play) {
-            play.classList.remove('d-none');
-            play.classList.add('d-block');
-        }
-        if(bar) bar.classList.add('d-none'); // Ocultar barra flotante
+        alert(`📂 Playlist "${playlist.name}" cargada en el editor.`);
     }
 
-    addToSchedule() {
-        alert("Función Agendar lista (Configura los inputs de fecha primero)");
+    /**
+     * Guardar en LocalStorage (para que no se borre al cerrar la ventana)
+     */
+    persist() {
+        localStorage.setItem('clinic_playlists', JSON.stringify(this.playlists));
+    }
+
+    /**
+     * EL CEREBRO: Revisa qué toca reproducir hoy
+     */
+    checkSchedule() {
+        // Obtenemos la fecha de hoy en formato YYYY-MM-DD (igual que los inputs HTML)
+        const today = new Date().toISOString().split('T')[0];
+
+        // Buscamos si hay alguna playlist activa para hoy
+        // Lógica: Hoy debe ser mayor/igual al Inicio Y menor/igual al Fin
+        const activePlaylist = this.playlists.find(p => 
+            today >= p.start && today <= p.end
+        );
+
+        // Referencia al reproductor (asegurándonos de que existe)
+        const manager = window.clinicManager;
+        if (!manager || !manager.videoPlayer) return;
+
+        // CASO A: Hay una playlist activa hoy
+        if (activePlaylist) {
+            // Solo actuamos si la playlist activa es DIFERENTE a la que ya está sonando
+            if (this.currentPlaylistId !== activePlaylist.id) {
+                console.log(`📅 ¡CAMBIO DE PROGRAMACIÓN! Activando: ${activePlaylist.name}`);
+                
+                this.currentPlaylistId = activePlaylist.id;
+
+                // REINICIAMOS EL REPRODUCTOR CON FILTRO
+                // Le pasamos la carpeta raíz actual y la lista de IDs permitidos.
+                // El VideoPlayer se encargará de clasificar (A/M/B) solo lo que esté en esa lista.
+                manager.videoPlayer.init(manager.currentFolderId, activePlaylist.folders);
+                
+                this.updateUIStatus(`Modo Playlist: ${activePlaylist.name}`);
+            }
+        } 
+        // CASO B: No hay nada programado hoy (Volver a la normalidad)
+        else {
+            if (this.currentPlaylistId !== 'DEFAULT') {
+                console.log("📅 Sin programación específica. Volviendo a modo DEFAULT (Todo).");
+                
+                this.currentPlaylistId = 'DEFAULT';
+
+                // Reiniciamos el reproductor SIN filtros (null)
+                manager.videoPlayer.init(manager.currentFolderId, null);
+                
+                this.updateUIStatus("Modo: Reproducción General");
+            }
+        }
+    }
+
+    /**
+     * Actualiza algún texto en pantalla para saber qué está pasando (Opcional)
+     */
+    updateUIStatus(text) {
+        const statusEl = document.getElementById('playlist-status-indicator');
+        if (statusEl) statusEl.innerText = text;
     }
 }
 
@@ -66,7 +172,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 2. Iniciamos ScheduleManager (AHORA SÍ FUNCIONARÁ)
-    window.scheduleManager = new ScheduleManager(); 
+    window.scheduleManager = new ScheduleManager();
+
+    actualizarListaPlaylistsGuardadas();
+    renderSavedPlaylists();
     
     console.log("Sistemas iniciados correctamente");
 });
@@ -380,6 +489,7 @@ class ClinicManager {
 
     removeFromPlaylist(id) {
         this.playlistSelection.delete(id);
+        window.currentPlaylistSelection = Array.from(this.playlistSelection);
         this.updateFloatingBar();
         this.showPlaylistReview(); 
     }
@@ -867,12 +977,10 @@ class ClinicManager {
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', file);
 
-        // 4. Configurar la subida con XMLHttpRequest para rastrear progreso
         const xhr = new XMLHttpRequest();
         xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id');
         xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
 
-        // --- Evento de Progreso Real ---
         xhr.upload.onprogress = (event) => {
             if (event.lengthComputable) {
                 const percent = Math.round((event.loaded / event.total) * 100);
@@ -881,11 +989,9 @@ class ClinicManager {
             }
         };
 
-        // 5. Manejar el final de la subida
         xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
                 if (statusText) statusText.innerText = "✅ ¡Completado!";
-                // Pequeña espera para que el usuario vea el 100%
                 setTimeout(() => {
                     this.viewFolderContent(this.currentFolderId);
                     alert("Archivo subido con éxito.");
@@ -894,7 +1000,6 @@ class ClinicManager {
                 alert("❌ Error en la subida: " + xhr.statusText);
             }
             
-            // Ocultar barra al terminar
             setTimeout(() => {
                 if (container) {
                     container.classList.add('d-none');
@@ -918,13 +1023,11 @@ class VideoPlayer {
         this.videoElement = document.getElementById('main-player');
         this.rootFolderId = null;
         
-        // Estado
         this.fadeStarted = false;
         this.audioFadeStarted = false;
         this.audioFadeInterval = null;
         this.isLoading = false; 
         
-        // Lógica
         this.lastFolderId = null; 
         this.playedHistory = new Set();
         this.videoCache = {}; 
@@ -1009,7 +1112,6 @@ class VideoPlayer {
             this.folders = { alta: [], media: [], baja: [] };
             let foldersToProcess = data.files || [];
 
-            // FILTRADO POR PLAYLIST
             if (this.allowedFolderIds && this.allowedFolderIds.length > 0) {
                 foldersToProcess = foldersToProcess.filter(f => this.allowedFolderIds.includes(f.id));
             }
@@ -1048,7 +1150,6 @@ class VideoPlayer {
             let pool = [...this.folders.baja];
             if (pool.length === 0) pool = [...this.folders.media, ...this.folders.alta];
             
-            // Lógica No-Repeat Carpeta Consecutiva
             if (pool.length > 1 && this.lastFolderId) {
                 pool = pool.filter(id => id !== this.lastFolderId);
             }
@@ -1165,7 +1266,6 @@ class VideoPlayer {
     }
 }
 
-// FUNCIONES GLOBALES DE RELOJ Y CLIMA
 function updateClock() {
     const now = new Date();
     const timeEl = document.getElementById('hora');
@@ -1189,90 +1289,104 @@ document.addEventListener('DOMContentLoaded', () => {
     updateClock(); setInterval(updateClock, 1000);
     updateWeather(); setInterval(updateWeather, 1800000);
     
-    // Instancia única global
     window.clinicManager = new ClinicManager(new VideoPlayer()); 
 });
 
+let currentPlaylistSelection = []; 
+
 function openScheduleManager() {
-    // 1. Buscamos TODOS los checkboxes marcados en la página
-    // (Excluimos el posible checkbox oculto de "seleccionar todos" si tuvieras uno)
-    const checkboxes = document.querySelectorAll('input[type="checkbox"]:checked');
+    // 1. Capturar todos los checkboxes marcados
+    // Usamos la clase .folder-checkbox para ser más específicos
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
     
-    // Filtramos para asegurarnos de que sean carpetas (por si hay otros checkboxes)
-    // Asumimos que las carpetas tienen un valor numérico o ID
-    const playlistSelection = Array.from(checkboxes).filter(cb => cb.value && cb.closest('#folders-list'));
-    
-    const count = playlistSelection.size;
-
-    // VALIDACIÓN
-    if (count === 0) return alert("Por favor, marca al menos una casilla ☑️ antes de continuar.");
-
-    // 2. Llenar la lista visual
-    const previewList = document.getElementById('playlist-preview-list');
-    previewList.innerHTML = ''; 
-
-    playlistSelection.forEach(cb => {
-        // TRUCO: Si no tienes el data-name, buscamos el texto que está al lado del checkbox
-        let name = "Carpeta sin nombre";
-        
-        // Intenta leer el atributo data
-        if (cb.getAttribute('data-name')) {
-            name = cb.getAttribute('data-name');
-        } 
-        // Si no, intenta leer el texto del contenedor padre
-        else if (cb.parentElement) {
-            // Clona el elemento, borra el checkbox y lee el texto que queda
-            let clone = cb.parentElement.cloneNode(true);
-            let input = clone.querySelector('input');
-            if(input) input.remove();
-            name = clone.innerText.trim() || "Carpeta ID " + cb.value;
-        }
-
-        previewList.innerHTML += `
-            <div class="d-flex justify-content-between border-bottom border-secondary border-opacity-25 py-1">
-                <span class="text-white-50 small" style="font-size: 0.8rem;">📂 ${name}</span>
-                <span class="text-info small">✔</span>
-            </div>
-        `;
-    });
-
-    // 3. Actualizar el contador AZUL
-    const badge = document.getElementById('selected-count-badge');
-    if(badge) {
-        badge.innerText = count + " carpetas";
-        badge.classList.remove('bg-danger');
-        badge.classList.add('bg-primary');
+    // 2. Validación: Si no hay nada marcado, avisar y salir
+    if (checkboxes.length === 0) {
+        alert("⚠️ Por favor, marca al menos una carpeta antes de configurar la playlist.");
+        return;
     }
 
-    // 4. Cambiar pantalla
+    // 3. Preparar las variables y la interfaz
+    currentPlaylistSelection = []; // Limpiamos selección anterior
+    const previewList = document.getElementById('playlist-preview-list');
+    previewList.innerHTML = ''; // Limpiamos la lista visual anterior
+
+    // 4. Recorrer los checkboxes para guardar datos y pintar la lista
+    checkboxes.forEach(cb => {
+        const folderId = cb.value;
+        let folderName = "Carpeta sin nombre";
+
+        // Intentamos obtener el nombre del atributo data-name (más limpio)
+        if (cb.getAttribute('data-name')) {
+            folderName = cb.getAttribute('data-name');
+        } 
+        // Fallback: Si no hay atributo, intentamos sacarlo del texto del padre (tu lógica original)
+        else if (cb.parentElement) {
+            let clone = cb.parentElement.cloneNode(true);
+            let input = clone.querySelector('input');
+            if(input) input.remove(); // Quitamos el checkbox del clon para tener solo texto
+            folderName = clone.innerText.trim() || `ID: ${folderId}`;
+        }
+
+        // GUARDAMOS EL ID EN LA VARIABLE GLOBAL (Importante para el paso de guardar)
+        currentPlaylistSelection.push(folderId);
+
+        // GENERAMOS EL HTML VISUAL
+        const itemHTML = `
+            <div class="d-flex justify-content-between align-items-center border-bottom border-secondary border-opacity-25 py-2">
+                <div class="text-truncate">
+                    <i class="bi bi-folder2-open text-warning me-2"></i>
+                    <span class="text-white-50 small">${folderName}</span>
+                </div>
+                <span class="badge bg-success rounded-pill" style="font-size: 0.7em;">Incluida</span>
+            </div>
+        `;
+        previewList.insertAdjacentHTML('beforeend', itemHTML);
+    });
+
+    // 5. Actualizar el contador (Badge)
+    const badge = document.getElementById('selected-count-badge');
+    if(badge) {
+        badge.innerText = `${currentPlaylistSelection.length} carpetas`;
+        badge.classList.remove('d-none', 'bg-danger');
+        badge.classList.add('bg-info');
+    }
+
+    // 6. Resetear los inputs del formulario (Fecha y Nombre) para que estén limpios
+    const nameInput = document.getElementById('playlist-name'); // Asegúrate que tu input tenga este ID
+    const startInput = document.getElementById('playlist-start'); // Asegúrate que tu input tenga este ID
+    const endInput = document.getElementById('playlist-end');     // Asegúrate que tu input tenga este ID
+
+    if (nameInput) nameInput.value = '';
+    // Poner fecha de hoy por defecto en el inicio
+    if (startInput) startInput.value = new Date().toISOString().split('T')[0];
+    if (endInput) endInput.value = '';
+
+    // 7. Cambio de Pantalla: Ocultar Dashboard, Mostrar Creador de Playlist
     document.getElementById('step-dashboard').classList.add('d-none');
+    document.getElementById('step-dashboard').classList.remove('d-block');
+
     document.getElementById('step-playlist').classList.remove('d-none');
     document.getElementById('step-playlist').classList.add('d-block');
     
-    // Ocultar barra inferior
-    document.getElementById('bottom-action-bar').classList.remove('d-block');
-    document.getElementById('bottom-action-bar').classList.add('d-none');
+    // Ocultar la barra flotante inferior (ya no es necesaria en esta pantalla)
+    const bottomBar = document.getElementById('bottom-action-bar');
+    if (bottomBar) {
+        bottomBar.classList.remove('d-block');
+        bottomBar.classList.add('d-none');
+    }
 }
 
-// Inicializamos la instancia global
 const scheduleManager = new ScheduleManager();
 
-// ==========================================
-// FUNCIONES DE NAVEGACIÓN Y CONEXIÓN
-// ==========================================
 
-// 1. Esta función se debe llamar CADA VEZ que marcas un checkbox
-// (Busca en tu código donde tienes el "checkbox onchange" y añade esta llamada)
 function updateBottomBar() {
     const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
     const count = checkboxes.length;
     const bar = document.getElementById('bottom-action-bar');
     const counterText = document.getElementById('selection-counter');
 
-    // Actualizamos el número
     if (counterText) counterText.innerText = count;
 
-    // Mostramos u ocultamos la barra
     if (count > 0) {
         bar.classList.remove('d-none');
         bar.classList.add('d-block');
@@ -1283,18 +1397,14 @@ function updateBottomBar() {
 }
 
 document.addEventListener('click', function(e) {
-    // Si pulsamos cualquier botón de cerrar o volver...
     if (e.target.closest('.btn-close') || e.target.closest('[data-bs-dismiss="modal"]') || e.target.innerText === "Cerrar" || e.target.innerText.includes("Volver")) {
         
         console.log("🧹 Limpiando residuos del modal...");
         
-        // Esperamos medio segundo a que termine la animación de cierre
         setTimeout(() => {
-            // 1. Eliminar todas las cortinas negras (backdrops) a la fuerza
             const backdrops = document.querySelectorAll('.modal-backdrop');
             backdrops.forEach(backdrop => backdrop.remove());
 
-            // 2. Desbloquear el scroll del cuerpo
             document.body.classList.remove('modal-open');
             document.body.style.overflow = 'auto';
             document.body.style.paddingRight = '0';
@@ -1302,5 +1412,249 @@ document.addEventListener('click', function(e) {
     }
 });
 
+function guardarPlaylistDesdeUI() {
+    console.log("💾 Intentando guardar playlist...");
 
+    // 1. OBTENER LOS ELEMENTOS EXACTOS DE TU HTML
+    const nameInput = document.getElementById('playlist-name-input');
+    const startInput = document.getElementById('date-start'); // ID corregido según tu HTML
+    const endInput = document.getElementById('date-end');     // ID corregido según tu HTML
 
+    // 2. VALIDAR QUE EXISTAN (Seguridad)
+    if (!nameInput || !startInput || !endInput) {
+        console.error("Error: No encuentro los inputs. IDs buscados: playlist-name-input, date-start, date-end");
+        alert("Error interno: Faltan campos en la interfaz.");
+        return;
+    }
+
+    // 3. RECUPERAR DATOS
+    const name = nameInput.value;
+    const start = startInput.value;
+    const end = endInput.value;
+    
+    // Recuperar carpetas seleccionadas (variable global del paso anterior)
+    // Usamos 'currentPlaylistSelection' o 'tempSelectedIds' (asegúrate que openScheduleManager llene una de estas)
+    let seleccion = window.currentPlaylistSelection || [];
+
+    // 4. VALIDACIONES LÓGICAS
+    if (!name) {
+        alert("⚠️ Por favor, escribe un nombre para la playlist.");
+        return;
+    }
+    if (seleccion.length === 0) {
+        alert("⚠️ No has seleccionado ninguna carpeta (0 carpetas).");
+        return;
+    }
+    // Nota: Si quieres permitir guardar sin fechas, quita este if
+    if (!start || !end) {
+        alert("⚠️ Por favor, selecciona las fechas de inicio y fin en el calendario (Panel derecho).");
+        return;
+    }
+
+    // 5. GUARDAR (Llamada a la clase)
+    if (window.scheduleManager) {
+        const exito = window.scheduleManager.savePlaylist(name, start, end, seleccion);
+
+        if (exito) {
+            // Limpiar campos
+            nameInput.value = '';
+            startInput.value = '';
+            endInput.value = ''
+          
+            
+            // Actualizar el menú desplegable de "Cargar Playlist"
+            renderSavedPlaylists(); 
+        }
+    } else {
+        alert("Error: El sistema (ScheduleManager) no está listo.");
+    }
+}
+
+function renderSavedPlaylists() {
+    const container = document.getElementById('saved-playlists-container');
+    
+    if (!container || !window.scheduleManager) return;
+
+    const playlists = window.scheduleManager.playlists || [];
+    container.innerHTML = '';
+
+    if (playlists.length === 0) {
+        container.innerHTML = '<p class="text-muted small text-center my-3">No hay playlists guardadas.</p>';
+        return;
+    }
+
+    playlists.forEach(p => {
+        const item = document.createElement('div');
+        // Usamos flex para separar info del botón borrar
+        item.className = 'd-flex justify-content-between align-items-center bg-dark border border-secondary p-1 px-2 rounded mb-1';
+    
+    item.innerHTML = `
+        <div class="d-flex align-items-center flex-grow-1" style="cursor: pointer;" onclick="verDetallesPlaylist('${p.id}')">
+            <div class="me-2 fs-5">💿</div> 
+            <div class="overflow-hidden">
+                <div class="d-flex align-items-center">
+                    <span class="text-warning fw-bold text-truncate me-2" style="max-width: 120px;">${p.name}</span>
+                    <span class="text-white-50 small" style="font-size: 0.75rem;">(${p.folders.length} carpetas)</span>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-outline-danger btn-sm py-0 px-2" onclick="borrarPlaylist('${p.id}', event)" title="Eliminar">
+            ×
+        </button>
+    `;
+    container.appendChild(item);
+    });
+}
+
+// Función auxiliar para borrar
+function borrarPlaylist(id, event) {
+    // Evita que el clic active el "ver detalles" del contenedor padre
+    event.stopPropagation(); 
+
+    if (confirm("¿Estás seguro de que quieres ELIMINAR esta playlist?")) {
+        // Llamamos al manager para borrarla de la memoria
+        window.scheduleManager.deletePlaylist(id);
+        
+        // Volvemos a pintar la lista actualizada
+        renderSavedPlaylists();
+    }
+}
+
+// Función placeholder para cuando hagamos la interfaz de detalles (siguiente paso)
+function verDetallesPlaylist(id) {
+    console.log("Pronto abriremos los detalles de:", id);
+    alert("🚧 Aquí se abrirá la vista de detalles (Siguiente paso)");
+}
+
+function prepararYMostrarPlaylist() {
+    console.log("🔄 Preparando datos para la playlist...");
+
+    // 1. Buscamos todos los checkboxes que estén marcados (checked)
+    // Asumo que tus checkboxes tienen la clase 'folder-checkbox'. Si tienen otra, cámbialo aquí.
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    
+    // 2. Extraemos los IDs (value) de esos checkboxes
+    const seleccionados = Array.from(checkboxes).map(cb => cb.value);
+
+    // 3. Guardamos esto en la variable GLOBAL que usa el botón de guardar
+    window.currentPlaylistSelection = seleccionados;
+
+    console.log("✅ IDs capturados:", window.currentPlaylistSelection);
+
+    if (seleccionados.length === 0) {
+        alert("⚠️ No hay carpetas seleccionadas. Marca algunas casillas primero.");
+        return;
+    }
+
+    // 4. Actualizamos la lista visual en el paso de Playlist (Opcional, pero recomendado)
+    const previewContainer = document.getElementById('playlist-preview-list');
+    const badge = document.getElementById('selected-count-badge');
+    
+    if (previewContainer) {
+        previewContainer.innerHTML = ''; // Limpiar
+        // Recorremos los checkboxes para sacar también el nombre (data-name o el label cercano)
+        checkboxes.forEach(cb => {
+            // Intentamos obtener el nombre. Si no tienes data-name, intentamos buscar el label
+            let nombre = cb.getAttribute('data-folder-name') || "Carpeta " + cb.value;
+            
+            const div = document.createElement('div');
+            div.className = "border-bottom border-secondary py-1";
+            div.innerHTML = `Running: <span class="text-info">${nombre}</span>`;
+            previewContainer.appendChild(div);
+        });
+    }
+
+    if (badge) {
+        badge.innerText = `${seleccionados.length} carpetas`;
+    }
+
+    window.currentPlaylistSelection = Array.from(window.clinicManager.playlistSelection);
+
+    if (window.clinicManager) {
+        window.clinicManager.showStep('step-playlist');
+    } else {
+        // Fallback manual por si acaso
+        document.getElementById('step-dashboard').classList.remove('d-block');
+        document.getElementById('step-dashboard').classList.add('d-none');
+        document.getElementById('step-playlist').classList.remove('d-none');
+        document.getElementById('step-playlist').classList.add('d-block');
+    }
+}
+
+setTimeout(() => {
+    renderSavedPlaylists();
+}, 500);
+
+let playlistSeleccionadaParaReproducir = null; // Variable global temporal
+
+function verDetallesPlaylist(id) {
+    const playlist = window.scheduleManager.playlists.find(p => p.id === id);
+    if (!playlist) return;
+
+    playlistSeleccionadaParaReproducir = playlist; 
+
+    // 1. Rellenar datos básicos
+    document.getElementById('modalPlaylistName').innerText = playlist.name;
+    document.getElementById('modalPlaylistDates').innerText = `${playlist.start} al ${playlist.end}`;
+    document.getElementById('modalPlaylistCount').innerText = `${playlist.folders.length} Carpeta(s)`;
+
+    const contentDiv = document.getElementById('modalPlaylistContent');
+    contentDiv.innerHTML = ''; 
+
+    // 2. Listar solo NOMBRES de carpetas
+    playlist.folders.forEach(folderId => {
+        // Buscamos el nombre real en la memoria del gestor
+        const folderData = window.clinicManager.allFolders ? window.clinicManager.allFolders.find(f => f.id === folderId) : null;
+        
+        // Si por alguna razón no tenemos el nombre, usamos "Carpeta de Playlist" en lugar del ID feo
+        const folderName = folderData ? folderData.name : "Carpeta de Playlist";
+
+        const folderEl = document.createElement('div');
+        folderEl.className = 'bg-secondary bg-opacity-10 p-2 rounded mb-2 border-start border-info border-3';
+        folderEl.innerHTML = `
+            <div class="fw-bold text-info small">📁 ${folderName}</div>
+            <div class="ps-3 small text-white-50 mt-1" id="videos-of-${folderId}" style="font-size: 0.8rem;">
+                <span class="spinner-border spinner-border-sm" style="width: 10px; height: 10px;"></span> Listando videos...
+            </div>
+        `;
+        contentDiv.appendChild(folderEl);
+
+        // Llamamos a Drive para traer los videos
+        obtenerVideosDeCarpeta(folderId, `videos-of-${folderId}`);
+    });
+
+    // 3. Lanzar el modal
+    const modalElement = document.getElementById('playlistDetailsModal');
+    const myModal = new bootstrap.Modal(modalElement);
+    myModal.show();
+}
+
+// Función auxiliar para listar los videos dentro del modal
+async function obtenerVideosDeCarpeta(folderId, elementId) {
+    try {
+        const response = await gapi.client.drive.files.list({
+            q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
+            fields: 'files(name)',
+        });
+        const videos = response.result.files;
+        const target = document.getElementById(elementId);
+        
+        if (videos && videos.length > 0) {
+            target.innerHTML = videos.map(v => `• ${v.name}`).join('<br>');
+        } else {
+            target.innerHTML = '<span class="fst-italic">No se encontraron videos.</span>';
+        }
+    } catch (e) {
+        document.getElementById(elementId).innerText = "Error cargando videos.";
+    }
+}
+
+function reproducirPlaylistActual() {
+    if (!playlistSeleccionadaParaReproducir) return;
+    
+    alert(`🎬 Iniciando reproducción de: ${playlistSeleccionadaParaReproducir.name}\n(Aquí conectaremos con tu reproductor de video)`);
+    
+    // Aquí es donde en el futuro llamarás a tu función de pantalla completa
+    // Por ejemplo: iniciarReproductor(playlistSeleccionadaParaReproducir.folders);
+}
