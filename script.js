@@ -184,71 +184,62 @@ class ClinicManager {
     constructor(playerInstance) {
         this.player = playerInstance;
 
+        // Estado de selección
         this.selectedClinicName = localStorage.getItem('savedClinicName') || null;
         this.selectedFolderId = localStorage.getItem('savedClinicId') || null;
         
-        this.selectedClinicName = null;
-        this.selectedFolderId = null;
+        // Autenticación y Seguridad
         this.accessToken = null;
+        this.tokenExpiration = 0; 
         this.tokenClient = null;
+        
+        // Estado de Navegación
         this.currentFolderId = null;
-
+        this.currentFolderName = ""; 
         this.allFolders = [];
         
-        // Estado de la Playlist (Mapa: ID -> Objeto Carpeta)
+        // Playlist
         this.playlistSelection = new Map();
 
+        // Elementos UI
         this.containerClinics = document.getElementById('clinics-container');
         this.menuOverlay = document.getElementById('clinic-menu');
         this.clinicTitle = document.getElementById('clinic-title-display');
         this.selectionBar = document.getElementById('selection-bar');
 
-        this.initGoogleAuth();  
+        this.initGoogleAuth();   
         this.initSearch();
     }
 
-    forceLogin() {
-        console.warn("🔄 Token expirado. Solicitando nuevo inicio de sesión...");
-        localStorage.removeItem('google_access_token');
-        this.accessToken = null;
-        // En lugar de abrir el popup a la fuerza, mostramos la pantalla de login
-        this.renderLoginScreen(); 
-    }
-
-    renderLoginScreen() {
-        if (!this.containerClinics) return;
-
-        this.containerClinics.innerHTML = `
-            <div class="d-flex flex-column align-items-center justify-content-center mt-5">
-                <h4 class="text-white mb-4">Bienvenido</h4>
-                <p class="text-white-50 mb-4 text-center small">Inicia sesión para acceder a tus carpetas.</p>
-                <button id="btn-login-drive" class="btn btn-primary btn-lg shadow-sm">
-                    🔐 Conectar con Google Drive
-                </button>
-            </div>
-        `;
-
-        document.getElementById('btn-login-drive').onclick = () => {
-            if (this.tokenClient) {
-                this.tokenClient.requestAccessToken();
-            }
-        };
-    }
+    // ==========================================
+    // 1. SEGURIDAD Y CONEXIÓN (NÚCLEO)
+    // ==========================================
 
     initGoogleAuth() {
         if (window.google && window.google.accounts) {
             this.tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CONFIG.clientId,
                 scope: 'https://www.googleapis.com/auth/drive',
+                prompt: '',
                 callback: (tokenResponse) => {
                     if (tokenResponse && tokenResponse.access_token) {
+                        console.log("🔐 Token renovado.");
                         this.accessToken = tokenResponse.access_token;
-                        localStorage.setItem('google_access_token', tokenResponse.access_token);
-                        
-                        if(document.getElementById('step-dashboard') && !document.getElementById('step-dashboard').classList.contains('d-none')){
-                            this.loadDashboard();
+                        const expiresIn = tokenResponse.expires_in || 3599;
+                        this.tokenExpiration = Date.now() + (expiresIn * 1000) - 60000;
+
+                        localStorage.setItem('google_access_token', this.accessToken);
+                        localStorage.setItem('google_token_expiration', this.tokenExpiration);
+
+                        if (this.pendingResolver) {
+                            this.pendingResolver(this.accessToken);
+                            this.pendingResolver = null;
                         } else {
-                            this.loadClinicsFromDrive();
+                            if(document.getElementById('step-dashboard') && !document.getElementById('step-dashboard').classList.contains('d-none')){
+                                this.loadDashboard();
+                            } else {
+                                this.loadClinicsFromDrive();
+                            }
                         }
                     }
                 },
@@ -259,619 +250,102 @@ class ClinicManager {
         }
 
         const savedToken = localStorage.getItem('google_access_token');
-        
-        if (savedToken) {
-            console.log("✅ Token detectado. Intentando cargar...");
+        const savedExpiration = localStorage.getItem('google_token_expiration');
+        const now = Date.now();
+
+        if (savedToken && savedExpiration && now < parseInt(savedExpiration)) {
             this.accessToken = savedToken;
+            this.tokenExpiration = parseInt(savedExpiration);
             this.loadClinicsFromDrive(); 
         } else {
-            console.warn("🔒 Sin sesión. Mostrando login.");
             this.renderLoginScreen();
         }
     }
 
-    async loadClinicsFromDrive() {
-        try {
-            const q = `'${CONFIG.masterFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&key=${CONFIG.apiKey}`;
-            const headers = this.accessToken ? { 'Authorization': `Bearer ${this.accessToken}` } : {};
-
-            const response = await fetch(url, { headers });
-
-            if (response.status === 401 || response.status === 403) {
-                this.forceLogin();
-                return; 
-            }
-
-            const data = await response.json();
-            
-            if (this.containerClinics) this.containerClinics.innerHTML = '';
-            
-            if (data.files) {
-                data.files.forEach(folder => {
-                    const btn = document.createElement('button');
-                    btn.className = 'btn btn-clinic btn-lg mb-3 w-100 animate-fade-in';
-                    btn.innerText = folder.name;
-                    btn.onclick = () => this.selectClinic(folder.name, folder.id);
-                    this.containerClinics.appendChild(btn);
-                });
-            }
-        } catch (error) { 
-            console.error("Error cargando clínicas", error);
-            if(this.containerClinics) this.containerClinics.innerHTML = '<div class="text-danger">Error de conexión</div>';
-        }
-    }
-
-    selectClinic(name, id) {
-    this.selectedClinicName = name;
-    this.selectedFolderId = id;
-    
-    // CAMBIO 2: ¡Guardamos la elección para que no se olvide!
-    localStorage.setItem('savedClinicName', name);
-    localStorage.setItem('savedClinicId', id);
-
-    this.playlistSelection.clear();
-    this.updateFloatingBar();
-    if (this.clinicTitle) this.clinicTitle.innerText = name;
-    this.showStep('step-decision');
-}
-
-    async showStep(stepId) {
-    console.log("🚀 Cambiando a paso:", stepId);
-    
-    const container = document.querySelector('.menu-container');
-    
-    // 1. Gestionar el ancho
-    if (container) {
-        if (stepId === 'step-playlist') {
-            container.classList.add('container-wide');
-            container.style.maxWidth = '1300px';
-        } else {
-            container.classList.remove('container-wide');
-            container.style.maxWidth = '600px';
-        }
-    }
-
-    // 2. Mostrar/Ocultar pasos
-    ['step-select', 'step-decision', 'step-dashboard', 'step-playlist'].forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.classList.add('d-none');
-    });
-    
-    const target = document.getElementById(stepId);
-    if(target) target.classList.remove('d-none');
-
-    // 3. Lógica específica según el paso
-    const bar = document.getElementById('selection-bar');
-
-    if (stepId === 'step-dashboard') {
-        this.renderFolderList();
-        
-        setTimeout(() => {
-            console.log("🔄 Actualizando barra desde Dashboard...");
-            this.updateFloatingBar();
-        }, 150); 
-    } 
-    else if (stepId === 'step-playlist') {
-        // 1. Sincronizar recuadro de carpetas (Usando .size)
-        const count = this.playlistSelection ? this.playlistSelection.size : 0;
-        const badge = document.getElementById('selected-count-badge');
-        if (badge) badge.innerText = `${count} carpetas`;
-
-        // 2. Renderizar la lista de nombres (Corregido el nombre de la función)
-        // Usamos 'showPlaylistReview' que es la que existe en tu ClinicManager
-        if (typeof this.showPlaylistReview === 'function') {
-            this.showPlaylistReview();
-        }
-
-        // 3. Ocultar barra al entrar a programación (Con animación de salida)
-        if (bar) {
-            bar.classList.remove('active');
-            bar.style.bottom = "-150px";
-            // Opcional: ocultarla del todo tras la animación
-            setTimeout(() => { 
-                if(!bar.classList.contains('active')) bar.style.display = 'none'; 
-            }, 500);
-        }
-    }
-    else {
-        // Para cualquier otro paso (select, decision), ocultamos la barra
-        if (bar) {
-            bar.classList.remove('active');
-            bar.style.bottom = "-150px";
-        }
-    }
-}
-
-    backToDecision() { this.showStep('step-decision'); }
-
-    reset() {
-    this.selectedClinicName = null;
-    this.selectedFolderId = null;
-    
-    // CAMBIO 3: Borramos la memoria
-    localStorage.removeItem('savedClinicName');
-    localStorage.removeItem('savedClinicId');
-
-    this.playlistSelection.clear();
-    this.showStep('step-select');
-}
-
-    // --- NUEVA LÓGICA DE PLAYLIST ---
-
-    toggleFolderSelection(folder, isChecked) {
-        if (isChecked) {
-            this.playlistSelection.set(folder.id, folder);
-        } else {
-            this.playlistSelection.delete(folder.id);
-        }
-        this.updateFloatingBar();
-    }
-
-    updateFloatingBar() {
-    const bar = document.getElementById('selection-bar');
-    const countElement = document.getElementById('selection-count');
-    const playlistStep = document.getElementById('step-playlist');
-
-    if (!bar || !countElement) return;
-
-    const count = this.playlistSelection ? this.playlistSelection.size : 0;
-    countElement.innerText = count;
-
-    const isPlaylistActive = playlistStep && !playlistStep.classList.contains('d-none');
-
-    if (count > 0 && !isPlaylistActive) {
-        // 1. Si estaba oculta con display, la activamos
-        if (bar.style.display === "none" || !bar.classList.contains('active')) {
-            bar.style.display = "flex"; // O "block"
-            
-            // 2. EL TRUCO: Un pequeñísimo delay (reflow) para que el navegador 
-            // note el cambio y ejecute la animación de CSS
-            setTimeout(() => {
-                bar.classList.add('active');
-            }, 10); 
-        }
-    } else {
-        bar.classList.remove('active');
-        // 3. Esperamos a que termine la animación de salida antes de poner display: none
-        setTimeout(() => {
-            if (!bar.classList.contains('active')) {
-                bar.style.display = "none";
-            }
-        }, 500); // 500ms es lo que dura tu transición en CSS
-    }
-}
-
-    showPlaylistReview() {
-    // 1. Buscamos el contenedor donde se listarán las carpetas
-    const container = document.getElementById('playlist-preview-list');
-    if (!container) {
-        console.warn("⚠️ No se encontró el contenedor 'playlist-preview-list'");
-        return;
-    }
-
-    // 2. Limpiamos el contenido previo para no duplicar
-    container.innerHTML = '';
-
-    // 3. Si no hay nada seleccionado, mostramos un mensaje amigable
-    if (this.playlistSelection.size === 0) {
-        container.innerHTML = `
-            <div class="text-center py-4">
-                <p class="text-white-50 small">No hay carpetas seleccionadas en la playlist.</p>
-                <button class="btn btn-sm btn-outline-info" onclick="clinicManager.showStep('step-dashboard')">
-                    Ir a seleccionar
-                </button>
-            </div>`;
-        return;
-    }
-
-    // 4. Recorremos el Map y creamos los elementos visuales
-    this.playlistSelection.forEach((folder) => {
-        const item = document.createElement('div');
-        
-        // Estilo: fondo oscuro semi-transparente con borde celeste a la izquierda
-        item.className = 'playlist-item d-flex justify-content-between align-items-center p-2 mb-2 bg-white bg-opacity-10 border-start border-info border-3 rounded animate-fade-in';
-        
-        item.innerHTML = `
-            <div class="ps-2">
-                <div class="text-white fw-bold small">📂 ${folder.name}</div>
-                <div class="text-white-50" style="font-size: 0.7rem;">ID: ${folder.id.substring(0, 8)}...</div>
-            </div>
-            <button class="btn btn-link text-danger p-0 me-2" 
-                    onclick="clinicManager.removeFromPlaylist('${folder.id}')" 
-                    title="Quitar de la lista">
-                <span style="font-size: 1.2rem;">&times;</span>
-            </button>
-        `;
-        container.appendChild(item);
-    });
-}
-
-    removeFromPlaylist(id) {
-        this.playlistSelection.delete(id);
-        window.currentPlaylistSelection = Array.from(this.playlistSelection);
-        this.updateFloatingBar();
-        this.showPlaylistReview(); 
-    }
-
-    launchPlaylist() {
-        if (this.playlistSelection.size === 0) return alert("Selecciona al menos una carpeta.");
-        
-        const selectedIds = Array.from(this.playlistSelection.keys());
-        console.log("🚀 Lanzando playlist maestra:", selectedIds);
-        
-        this.menuOverlay.classList.add('slide-up');
-        this.player.init(this.selectedFolderId, selectedIds);
-    }
-
-    // --- FIN NUEVA LÓGICA ---
-
-    initSearch() {
-        const searchInput = document.getElementById('folder-search-input');
-        if(!searchInput) return;
-
-        searchInput.addEventListener('input', (e) => {
-            const text = e.target.value.toUpperCase().trim();
-            if (text === "") {
-                this.renderFolderList(this.allFolders);
+    async ensureValidToken() {
+        return new Promise((resolve) => {
+            const now = Date.now();
+            if (this.accessToken && now < this.tokenExpiration) {
+                resolve(this.accessToken);
                 return;
             }
-            const filtered = this.allFolders.filter(f => f.name.toUpperCase().includes(text));
-            this.renderFolderList(filtered);
+            console.log("🔄 Renovando token...");
+            this.pendingResolver = resolve;
+            this.tokenClient.requestAccessToken({ prompt: '' });
         });
     }
 
-    renderFolderList(filesToRender) {
-    const listContainer = document.getElementById('folders-list');
-    if (!listContainer) return;
-    
-    // 1. LIMPIEZA Y DELEGACIÓN: Solo asignamos el evento una vez
-    listContainer.innerHTML = '';
-    
-    // Usamos onclick en el contenedor para atrapar cualquier clic en los hijos
-    listContainer.onclick = (e) => {
-        // Si lo que clickeamos es un checkbox de carpeta
-        if (e.target.classList.contains('folder-checkbox')) {
-            const folderId = e.target.value;
-            const folderName = e.target.dataset.name;
-            const isChecked = e.target.checked;
+    async safeDriveFetch(url, options = {}) {
+        try {
+            await this.ensureValidToken(); 
+            const headers = {
+                'Authorization': `Bearer ${this.accessToken}`,
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+            if (options.body instanceof FormData) delete headers['Content-Type'];
 
-            // Ejecutamos la lógica de selección (dentro de tu clase)
-            this.toggleFolderSelection({id: folderId, name: folderName}, isChecked);
-            
-            // DISPARAMOS LA BARRA: Forzamos la actualización visual
-            this.updateFloatingBar();
+            let response = await fetch(url, { ...options, headers });
+
+            if (response.status === 401) {
+                this.tokenExpiration = 0; 
+                await this.ensureValidToken(); 
+                const newHeaders = { ...headers, 'Authorization': `Bearer ${this.accessToken}` };
+                response = await fetch(url, { ...options, headers: newHeaders });
+            }
+            return response;
+        } catch (error) {
+            console.error("🔥 Error red:", error);
+            throw error;
         }
-    };
-
-    // MANTENER DATOS
-    const foldersToShow = filesToRender || this.allFolders || [];
-
-    if (foldersToShow.length === 0) {
-        listContainer.innerHTML = '<div class="text-white-50 text-center small mt-3">No se encontraron carpetas.</div>';
-        return;
     }
 
-    foldersToShow.forEach(folder => {
-        const lastChar = folder.name.slice(-1).toUpperCase();
-        let borderClass = 'border-intensity-B';
-        if(lastChar === 'A') borderClass = 'border-intensity-A';
-        if(lastChar === 'M') borderClass = 'border-intensity-M';
-
-        const isChecked = this.playlistSelection.has(folder.id) ? 'checked' : '';
-
-        const div = document.createElement('div');
-        div.id = `folder-card-${folder.id}`; 
-        div.className = `folder-item ${borderClass} d-flex align-items-center mb-2`;
-        
-        // Eventos Drag and Drop (se mantienen)
-        div.addEventListener('dragenter', (e) => { e.preventDefault(); div.classList.add('drag-over'); });
-        div.addEventListener('dragover', (e) => { e.preventDefault(); div.classList.add('drag-over'); });
-        div.addEventListener('dragleave', () => { div.classList.remove('drag-over'); });
-        div.addEventListener('drop', (e) => {
-            e.preventDefault();
-            div.classList.remove('drag-over');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) this.handleFileUpload(files[0], folder.id, folder.name);
-        });
-
-        // NOTA: El input ya no necesita 'onchange', lo maneja el 'onclick' del padre arriba
-        div.innerHTML = `
-            <div class="me-3">
-                <input class="form-check-input folder-checkbox" type="checkbox" 
-                value="${folder.id}" 
-                data-name="${folder.name}"   
-                ${isChecked}
-                style="transform: scale(1.3); cursor:pointer;">
-            </div>
-
-            <div class="flex-grow-1 clickable-folder px-2 py-1" style="min-width: 0;" 
-                 onclick="clinicManager.viewFolderContent('${folder.id}', '${folder.name}')"
-                 title="Click para ver contenido">
-                 
-                <div class="fw-bold text-white small text-truncate pointer-events-none">${folder.name}</div>
-                <span class="text-white-50 fst-italic" style="font-size: 0.65rem; opacity: 0.6;">
-                     Click para ver / Arrastra videos aquí
-                </span>
-                <div class="text-white-50" style="font-size:0.7rem" id="count-${folder.id}">Calculando...</div>
-            </div>
-            
-            <div class="btn-group ms-2" role="group">
-                <button class="btn btn-outline-warning btn-sm px-2" onclick="clinicManager.editIntensity('${folder.id}', '${folder.name}')" title="Editar Prioridad">✏️</button>
-                <button class="btn btn-outline-danger btn-sm px-2" onclick="clinicManager.deleteFolderById('${folder.id}', '${folder.name}')" title="Eliminar">🗑️</button>
-            </div>
-        `;
-        listContainer.appendChild(div);
-        this.countVideos(folder.id);
-    });
-}
-
-    // Reemplaza tu función handleFileUpload por esta:
-    async handleFileUpload(data) {
-    console.log("🚀 INICIANDO SUBIDA - Versión Optimizada para Video");
-
-    // 1. Detección de archivos (Compatible con Input y Drag & Drop)
-    let files = (data.target && data.target.files) ? data.target.files : data;
-    
-    if (!files || files.length === 0) {
-        console.warn("⚠️ No se seleccionaron archivos.");
-        return;
-    }
-    const file = files[0];
-
-    // 2. Validaciones de Seguridad
-    if (!this.currentFolderId) {
-        alert("⚠️ Error: No hay carpeta seleccionada. Por favor, vuelve a entrar a la carpeta.");
-        return;
-    }
-
-    if (typeof gapi === 'undefined' || !gapi.client) {
-        alert("⚠️ Error: La API de Google no está lista. Recarga la página (F5).");
-        return;
-    }
-
-    try {
-        // Feedback visual en el botón
-        const btn = document.getElementById('file-upload-input')?.nextElementSibling;
-        const originalText = btn ? btn.innerText : "✚ AÑADIR CONTENIDO";
-        if(btn) {
-            btn.innerText = "⏳ SUBIENDO...";
-            btn.disabled = true;
-        }
-
-        const accessToken = gapi.client.getToken().access_token;
-
-        // 3. METADATOS CLAVE: Aquí es donde le decimos a Drive que es un VIDEO
-        const metadata = {
-            'name': file.name,
-            'parents': [this.currentFolderId],
-            'mimeType': file.type || 'video/mp4' // Forzamos el tipo de archivo para que genere miniatura
+    renderLoginScreen() {
+        if (!this.containerClinics) return;
+        this.containerClinics.innerHTML = `
+            <div class="d-flex flex-column align-items-center justify-content-center mt-5">
+                <h4 class="text-white mb-4">Bienvenido</h4>
+                <button id="btn-login-drive" class="btn btn-primary btn-lg shadow-sm">🔐 Conectar</button>
+            </div>`;
+        document.getElementById('btn-login-drive').onclick = () => {
+            if (this.tokenClient) this.tokenClient.requestAccessToken({ prompt: 'consent' });
         };
-
-        const form = new FormData();
-        // Importante: El Blob de metadatos debe ser tipo application/json
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', file);
-
-        // 4. Petición a Google con campos de retorno específicos
-        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,thumbnailLink', {
-            method: 'POST',
-            headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
-            body: form
-        });
-
-        const responseData = await response.json();
-        
-        if (responseData.error) throw responseData.error;
-
-        console.log("✅ Archivo subido:", responseData);
-        alert(`✅ "${file.name}" subido con éxito. Google Drive está procesando la miniatura.`);
-        
-        // 5. Limpieza y Recarga
-        if(btn) {
-            btn.innerText = originalText;
-            btn.disabled = false;
-        }
-
-        // Recargamos el modal y el contador de la lista principal
-        this.viewFolderContent(this.currentFolderId);
-        this.countVideos(this.currentFolderId);
-
-    } catch (error) {
-        console.error('Error detallado en la subida:', error);
-        alert("❌ Error al subir: " + (error.message || "Problema de conexión"));
-        
-        const btn = document.getElementById('file-upload-input')?.nextElementSibling;
-        if(btn) {
-            btn.innerText = "✚ AÑADIR CONTENIDO";
-            btn.disabled = false;
-        }
-    }
-}
-
-    async loadDashboard() {
-        if (!this.accessToken) { this.tokenClient.requestAccessToken(); return; }
-
-        // 1. BÚSQUEDA INTENSIVA DEL ID (RAM o Disco Duro)
-        // Buscamos en la variable local O en la memoria del navegador directamente
-        let targetId = this.selectedFolderId || localStorage.getItem('savedClinicId');
-
-        // 2. VALIDACIÓN ESTRICTA (El cambio clave)
-        // Si después de buscar no tenemos ID, NO cargamos el MasterFolder.
-        // Significa que perdimos la ruta, así que volvemos al menú principal.
-        if (!targetId) {
-            console.warn("⚠️ Carpeta no identificada. Redirigiendo al inicio...");
-            this.reset(); // Limpia todo
-            this.loadClinicsFromDrive(); // Carga el menú de clínicas
-            return; // DETIENE la ejecución aquí.
-        }
-
-        // Si pasamos la validación, sincronizamos todo
-        this.selectedFolderId = targetId; 
-        this.currentFolderId = targetId;
-
-        // Ahora sí mostramos el dashboard
-        this.showStep('step-dashboard');
-        this.updatePreview(); 
-        
-        const listContainer = document.getElementById('folders-list');
-        listContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info small"></div></div>';
-
-        try {
-            // Usamos el ID validado (targetId)
-            const q = `'${targetId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-            
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,webViewLink)&key=${CONFIG.apiKey}`;
-            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${this.accessToken}` } });
-
-            if (res.status === 401 || res.status === 403) { this.forceLogin(); return; }
-
-            const data = await res.json();
-            
-            this.allFolders = data.files || [];
-            this.allFolders.sort((a, b) => a.name.localeCompare(b.name));
-
-            this.renderFolderList(this.allFolders);
-
-        } catch (e) {
-            console.error(e);
-            listContainer.innerHTML = '<div class="text-danger small text-center">Error de conexión.</div>';
-        }
     }
 
-    openFolder(link) { if(link) window.open(link, '_blank'); }
-
-    async editIntensity(id, oldName) {
-        const baseName = oldName.slice(0, -1); 
-        const currentInt = oldName.slice(-1);
-        const newInt = prompt(`Cambiar prioridad de "${oldName}" (A, M, B):`, currentInt);
-        
-        if (!newInt) return; 
-        const letter = newInt.toUpperCase().trim();
-        if (!['A', 'M', 'B'].includes(letter)) return alert("⚠️ Letra inválida.");
-        if (letter === currentInt) return; 
-
-        const newName = baseName + letter;
-
-        try {
-            document.body.style.cursor = 'wait';
-            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName })
-            });
-
-            if (res.ok) {
-                const folder = this.allFolders.find(f => f.id === id);
-                if(folder) folder.name = newName;
-                this.renderFolderList(this.allFolders);
-            }
-        } catch (e) { alert("Error de conexión."); } 
-        finally { document.body.style.cursor = 'default'; }
-    }
-
-    updatePreview() {
-        const topic = document.getElementById('new-topic').value;
-        const idRaw = document.getElementById('new-id').value;
-        const intensity = document.querySelector('input[name="intensity-btn"]:checked').value;
-
-        let prefix = "GEN";
-        if (this.selectedClinicName) {
-            prefix = this.selectedClinicName.replace(/\s+/g, '').substring(0, 3).toUpperCase();
-        }
-
-        const id = idRaw.padStart(2, '0');
-        const code = `${prefix}${topic}${id}${intensity}`;
-
-        document.getElementById('code-preview').innerText = code;
-        return code;
-    }
-
-    async createFolderFromUI() {
-        const folderName = this.updatePreview();
-        const btn = document.querySelector('.creation-panel button');
-        const originalText = btn.innerText;
-        
-        btn.innerText = "⏳";
-        btn.disabled = true;
-
-        try {
-            const res = await fetch('https://www.googleapis.com/drive/v3/files', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: folderName,
-                    mimeType: 'application/vnd.google-apps.folder',
-                    parents: [this.selectedFolderId]
-                })
-            });
-
-            if (res.ok) {
-                await this.loadDashboard();
-                document.getElementById('new-id').value = ""; 
-                this.updatePreview(); 
-            } else {
-                alert("Error al crear carpeta.");
-            }
-        } catch (e) { alert("Error de red."); } 
-        finally {
-            btn.innerText = originalText;
-            btn.disabled = false;
-        }
-    }
-
-    async deleteFolderById(folderId, name) {
-        if(!confirm(`¿Eliminar carpeta "${name}"?`)) return;
-        try {
-            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ trashed: true })
-            });
-            if(res.ok) this.loadDashboard();
-        } catch (e) { console.error(e); }
-    }
-
-    async countVideos(folderId) {
-        try {
-            const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&key=${CONFIG.apiKey}`;
-            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${this.accessToken}` } });
-            const data = await res.json();
-            
-            const countEl = document.getElementById(`count-${folderId}`);
-            if(countEl) countEl.innerText = `${data.files ? data.files.length : 0} videos`;
-        } catch (e) { }
-    }
+    // ==========================================
+    // 2. VISUALIZACIÓN DE CONTENIDO (MODAL)
+    // ==========================================
 
     async viewFolderContent(folderId, folderName) {
-        // 1. Preparamos el Modal
+        // 1. Configuración inicial y Limpieza
+        const cleanId = String(folderId).split(',')[0].trim();
+        this.currentFolderId = cleanId;
+        
+        if (folderName) this.currentFolderName = folderName;
+        else folderName = this.currentFolderName;
 
-        if (folderName) {
-        this.currentFolderName = folderName; // Si recibimos nombre, lo guardamos
-    } else {
-        folderName = this.currentFolderName; // Si no (ej: al recargar), usamos el guardado
-    }
-
-        this.currentFolderId = folderId;
         document.getElementById('modal-folder-name').innerText = folderName;
         const grid = document.getElementById('modal-files-grid');
-        grid.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-info"></div><p class="mt-2 text-white-50">Cargando archivos...</p></div>';
-        
+        // Spinner de carga
+        grid.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-info"></div><p class="mt-2 text-white-50">Cargando...</p></div>';
+
         // 2. Abrimos el Modal usando Bootstrap
-        // Asegúrate de que el ID coincida con el que pusiste en el HTML
         const modalEl = document.getElementById('folderContentModal');
-        const modal = new bootstrap.Modal(modalEl);
+        // Instancia segura (verifica si ya existe para no duplicar listeners)
+        let modal = bootstrap.Modal.getInstance(modalEl);
+        if (!modal) {
+            modal = new bootstrap.Modal(modalEl);
+        }
         modal.show();
 
         try {
-            // 3. Consultamos a Google Drive
-            // Buscamos: archivos dentro de la carpeta, que sean video o imagen, y no estén en la papelera
-            const q = `'${folderId}' in parents and (mimeType contains 'video/' or mimeType contains 'image/') and trashed = false`;
+            // 3. Consultamos a Google Drive (Usando safeDriveFetch para seguridad)
+            const q = `'${cleanId}' in parents and (mimeType contains 'video/' or mimeType contains 'image/') and trashed = false`;
             const fields = 'files(id, name, mimeType, thumbnailLink, webViewLink)';
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(fields)}&key=${CONFIG.apiKey}`;
+            // Eliminamos apiKey para usar solo Token Bearer (más seguro)
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(fields)}`;
             
-            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${this.accessToken}` } });
+            const res = await this.safeDriveFetch(url); // USAMOS LA VERSIÓN SEGURA
             const data = await res.json();
 
             grid.innerHTML = ''; // Limpiamos el spinner
@@ -885,24 +359,26 @@ class ClinicManager {
             // 5. Generamos las tarjetas
             data.files.forEach(file => {
                 const isVideo = file.mimeType.includes('video');
-                const badgeClass = isVideo ? 'badge-video' : 'badge-image';
+                const badgeClass = isVideo ? 'badge-video' : 'badge-image'; // Asegúrate de tener CSS para esto
                 const badgeText = isVideo ? 'VIDEO' : 'FOTO';
-                // Si Drive no da thumbnail (a veces pasa con videos nuevos), usamos el logo
                 const thumbUrl = file.thumbnailLink || 'img/logoclinica.png'; 
 
                 const col = document.createElement('div');
-                col.className = 'col-6 col-md-4 col-lg-3';
+                col.className = 'col-6 col-md-4 col-lg-3 mb-3'; // Agregué mb-3 para espacio
                 col.innerHTML = `
-                    <div class="file-thumbnail-card h-100">
-                        <span class="file-type-badge ${badgeClass}">${badgeText}</span>
+                    <div class="file-thumbnail-card h-100 position-relative bg-dark border border-secondary rounded overflow-hidden">
+                        <span class="position-absolute top-0 start-0 badge bg-${isVideo ? 'danger' : 'primary'} m-2">${badgeText}</span>
                         
-                        <button class="delete-file-btn" onclick="clinicManager.deleteFile('${file.id}', '${folderId}', '${folderName}')" title="Eliminar archivo">✕</button>
+                        <button class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2" 
+                                style="z-index:10;"
+                                onclick="clinicManager.deleteFile('${file.id}', '${cleanId}', '${folderName}')" 
+                                title="Eliminar archivo">✕</button>
                         
-                        <a href="${file.webViewLink}" target="_blank">
-                            <img src="${thumbUrl}" class="thumb-img" alt="${file.name}" referrerpolicy="no-referrer">
+                        <a href="${file.webViewLink}" target="_blank" class="d-block ratio ratio-16x9">
+                            <img src="${thumbUrl}" class="w-100 h-100 object-fit-cover" alt="${file.name}" referrerpolicy="no-referrer">
                         </a>
                         
-                        <div class="p-2">
+                        <div class="p-2 bg-black bg-opacity-50">
                             <div class="text-white small text-truncate" title="${file.name}">${file.name}</div>
                         </div>
                     </div>
@@ -916,53 +392,66 @@ class ClinicManager {
         }
     }
 
-    // Función para borrar archivos desde el modal
     async deleteFile(fileId, folderId, folderName) {
         if(!confirm('¿Estás seguro de eliminar este archivo permanentemente?')) return;
         
+        const btn = event.target; // Feedback visual inmediato
+        btn.disabled = true; btn.innerText = "...";
+
         try {
-            // Enviamos la orden de "trashed = true"
-            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+            // Usamos safeDriveFetch para manejar tokens expirados automáticamente
+            const res = await this.safeDriveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
                 method: 'PATCH',
-                headers: { 
-                    'Authorization': `Bearer ${this.accessToken}`, 
-                    'Content-Type': 'application/json' 
-                },
                 body: JSON.stringify({ trashed: true })
             });
 
             if (res.ok) {
-                // Recargamos el modal para ver que desapareció
-                this.viewFolderContent(folderId, folderName);
-                // Actualizamos el contador de la carpeta principal
-                this.countVideos(folderId);
+                this.viewFolderContent(folderId, folderName); // Recarga modal
+                this.countVideos(folderId); // Recarga dashboard
             } else {
                 alert("No se pudo eliminar. Revisa los permisos.");
+                btn.disabled = false; btn.innerText = "✕";
             }
         } catch (e) {
             console.error(e);
             alert("Error de conexión.");
+            btn.disabled = false; btn.innerText = "✕";
         }
-    } 
+    }
 
-    // Dentro de clinicManager:
-    async subirArchivoNuevo(listaDeArchivos) {
-        if (!listaDeArchivos || listaDeArchivos.length === 0) return;
-        const file = listaDeArchivos[0];
+    // ==========================================
+    // 3. SUBIDA DE ARCHIVOS (CON BARRA DE PROGRESO)
+    // ==========================================
 
-        // 1. Obtener Token y Referencias de tu HTML
-        const accessToken = gapi.client.getToken()?.access_token || localStorage.getItem('google_access_token');
+    // Esta función reemplaza a handleFileUpload antigua
+    async handleFileUpload(inputData) {
+        // Detectar si viene de un input event o drag&drop
+        let files = (inputData.target && inputData.target.files) ? inputData.target.files : inputData;
+        
+        // Si inputData es una FileList (Drag & Drop), úsala directamente
+        if (inputData instanceof FileList) files = inputData;
+        // Si inputData es un solo File (Drag & Drop individual)
+        if (inputData instanceof File) files = [inputData];
+
+        if (!files || files.length === 0) return;
+        const file = files[0];
+
+        // 1. Asegurar Token Válido antes de empezar
+        // Importante: xhr no usa safeDriveFetch, así que validamos manualmente aquí
+        const accessToken = await this.ensureValidToken();
+
+        if (!this.currentFolderId) {
+            alert("⚠️ Error: No hay carpeta seleccionada.");
+            return;
+        }
+
+        // Elementos del DOM (Asegúrate de tenerlos en tu HTML)
         const container = document.getElementById('upload-progress-container');
         const statusText = document.getElementById('upload-status');
         const percentageText = document.getElementById('upload-percentage');
         const progressBar = document.getElementById('upload-progress-bar');
 
-        if (!accessToken) {
-            alert("🔒 Sesión expirada. Inicia sesión de nuevo.");
-            return;
-        }
-
-        // 2. Mostrar la barra (quitando d-none) y resetear valores
+        // 2. Mostrar UI
         if (container) {
             container.classList.remove('d-none');
             container.classList.add('d-block');
@@ -971,16 +460,28 @@ class ClinicManager {
         if (percentageText) percentageText.innerText = '0%';
         if (statusText) statusText.innerText = `Subiendo: ${file.name}`;
 
-        // 3. Preparar datos para Google Drive
-        const metadata = { 'name': file.name, 'parents': [this.currentFolderId] };
+        // Desactivar botón de subida
+        const uploadBtn = document.getElementById('file-upload-input')?.nextElementSibling;
+        if(uploadBtn) uploadBtn.disabled = true;
+
+        // 3. Preparar datos
+        const metadata = { 
+            'name': file.name, 
+            'parents': [this.currentFolderId],
+            // Forzar video si es posible para generar thumbnails
+            'mimeType': file.type || 'video/mp4' 
+        };
+        
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', file);
 
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id');
+        // Solicitamos campos específicos para ahorrar datos
+        xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name');
         xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
 
+        // Evento de Progreso
         xhr.upload.onprogress = (event) => {
             if (event.lengthComputable) {
                 const percent = Math.round((event.loaded / event.total) * 100);
@@ -989,63 +490,445 @@ class ClinicManager {
             }
         };
 
+        // Evento Completado
         xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-                if (statusText) statusText.innerText = "✅ ¡Completado!";
+                if (statusText) statusText.innerText = "✅ Procesando...";
+                // Pequeño delay para que el usuario vea el 100%
                 setTimeout(() => {
-                    this.viewFolderContent(this.currentFolderId);
-                    alert("Archivo subido con éxito.");
-                }, 500);
+                    this.viewFolderContent(this.currentFolderId, this.currentFolderName);
+                    this.countVideos(this.currentFolderId);
+                    alert(`✅ "${file.name}" subido con éxito.`);
+                    
+                    if (container) {
+                        container.classList.add('d-none');
+                        container.classList.remove('d-block');
+                    }
+                }, 1000);
             } else {
-                alert("❌ Error en la subida: " + xhr.statusText);
+                console.error("Error upload:", xhr.responseText);
+                alert("❌ Error en la subida. Verifica tu conexión.");
+                if (container) container.classList.add('d-none');
             }
-            
-            setTimeout(() => {
-                if (container) {
-                    container.classList.add('d-none');
-                    container.classList.remove('d-block');
-                }
-            }, 1500);
+            if(uploadBtn) uploadBtn.disabled = false;
         };
 
         xhr.onerror = () => {
-            alert("❌ Error de red.");
+            alert("❌ Error crítico de red.");
             if (container) container.classList.add('d-none');
+            if(uploadBtn) uploadBtn.disabled = false;
         };
 
         xhr.send(form);
+    }
+
+    // ==========================================
+    // 4. DASHBOARD Y CARPETAS
+    // ==========================================
+
+    async loadDashboard() {
+        let targetId = this.selectedFolderId || localStorage.getItem('savedClinicId');
+        if (!targetId) { this.reset(); this.loadClinicsFromDrive(); return; }
+        
+        targetId = String(targetId).split(',')[0].trim();
+        this.selectedFolderId = targetId; 
+        this.currentFolderId = targetId;
+        this.showStep('step-dashboard');
+        this.updatePreview(); 
+        
+        const listContainer = document.getElementById('folders-list');
+        listContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info small"></div></div>';
+
+        try {
+            const q = `'${targetId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
+            const res = await this.safeDriveFetch(url); 
+            const data = await res.json();
+            
+            this.allFolders = data.files || [];
+            this.allFolders.sort((a, b) => a.name.localeCompare(b.name));
+            this.renderFolderList(this.allFolders);
+        } catch (e) {
+            listContainer.innerHTML = '<div class="text-danger small text-center">Error al cargar.</div>';
+        }
+    }
+
+    async loadClinicsFromDrive() {
+        try {
+            const q = `'${CONFIG.masterFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
+            const response = await this.safeDriveFetch(url); 
+
+            if (!response.ok) throw new Error("Error API");
+            const data = await response.json();
+            
+            if (this.containerClinics) this.containerClinics.innerHTML = '';
+            if (data.files) {
+                data.files.forEach(folder => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-clinic btn-lg mb-3 w-100 animate-fade-in';
+                    btn.innerText = folder.name;
+                    btn.onclick = () => this.selectClinic(folder.name, folder.id);
+                    this.containerClinics.appendChild(btn);
+                });
+            }
+        } catch (error) { 
+            if(this.containerClinics) this.containerClinics.innerHTML = '<div class="text-danger">Error de conexión</div>';
+        }
+    }
+
+    async createFolderFromUI() {
+        const folderName = this.updatePreview();
+        const btn = document.querySelector('.creation-panel button');
+        const originalText = btn.innerText;
+        btn.innerText = "⏳"; btn.disabled = true;
+
+        try {
+            const res = await this.safeDriveFetch('https://www.googleapis.com/drive/v3/files', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: folderName,
+                    mimeType: 'application/vnd.google-apps.folder',
+                    parents: [this.selectedFolderId]
+                })
+            });
+            if (res.ok) {
+                await this.loadDashboard();
+                document.getElementById('new-id').value = ""; 
+                this.updatePreview(); 
+            } 
+        } catch (e) { alert("Error al crear."); } 
+        finally { btn.innerText = originalText; btn.disabled = false; }
+    }
+
+    async deleteFolderById(folderId, name, event) {
+        if (event) { event.stopPropagation(); event.preventDefault(); }
+        const cleanId = String(folderId).split(',')[0].trim();
+        if(!confirm(`¿Eliminar carpeta "${name}"?`)) return;
+
+        try {
+            const res = await this.safeDriveFetch(`https://www.googleapis.com/drive/v3/files/${cleanId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ trashed: true })
+            });
+            if(res.ok) this.loadDashboard();
+        } catch (e) { console.error(e); }
+    }
+
+    // ==========================================
+    // 5. PLAYLIST (LÓGICA)
+    // ==========================================
+
+    async launchPlaylist() {
+        let idsParaReproducir = [];
+        if (window.currentPlaylistSelection && window.currentPlaylistSelection.length > 0) {
+            idsParaReproducir = window.currentPlaylistSelection;
+        } else if (this.playlistSelection && this.playlistSelection.size > 0) {
+            idsParaReproducir = Array.from(this.playlistSelection.keys());
+        } else {
+            return alert("⚠️ Selecciona al menos una carpeta.");
+        }
+
+        document.body.style.cursor = 'wait';
+        let finalQueue = [];
+
+        for (const idRaw of idsParaReproducir) {
+            const id = String(idRaw).split(',')[0].trim();
+            let folder = this.allFolders.find(f => f.id == id);
+            
+            if (!folder || !folder.files || folder.files.length === 0) {
+                const videos = await this.fetchVideosFromFolder(id);
+                if (folder) folder.files = videos;
+                else folder = { id: id, name: "Carpeta " + id, priority: 'M', files: videos };
+            }
+
+            if (folder.files && folder.files.length > 0) {
+                let multiplicador = folder.priority === 'A' ? 3 : (folder.priority === 'M' ? 2 : 1);
+                for (let i = 0; i < multiplicador; i++) {
+                    const batch = folder.files.map(file => ({
+                        ...file, originFolder: folder.name || "Desconocida", priorityRef: folder.priority || 'M'
+                    }));
+                    finalQueue.push(...batch);
+                }
+            }
+        }
+        document.body.style.cursor = 'default';
+        if (finalQueue.length === 0) return alert("❌ No se encontraron videos.");
+
+        finalQueue.sort(() => Math.random() - 0.5);
+        this.menuOverlay.classList.add('slide-up');
+        if (this.player && this.player.startQueue) this.player.startQueue(finalQueue);
+    }
+
+    async fetchVideosFromFolder(folderId) {
+        const cleanId = String(folderId).split(',')[0].trim();
+        try {
+            const q = `'${cleanId}' in parents and mimeType contains 'video/' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType)`; 
+            const response = await this.safeDriveFetch(url); 
+            if (!response.ok) return [];
+            const data = await response.json();
+            return data.files || [];
+        } catch (error) { return []; }
+    }
+
+    // ==========================================
+    // 6. UI HELPERS (SELECCIÓN, EDICIÓN, ETC)
+    // ==========================================
+
+    selectClinic(name, id) {
+        this.selectedClinicName = name;
+        this.selectedFolderId = String(id).split(',')[0].trim();
+        localStorage.setItem('savedClinicName', name);
+        localStorage.setItem('savedClinicId', this.selectedFolderId);
+        this.playlistSelection.clear();
+        this.updateFloatingBar();
+        if (this.clinicTitle) this.clinicTitle.innerText = name;
+        this.showStep('step-decision');
+    }
+
+    showStep(stepId) {
+        const container = document.querySelector('.menu-container');
+        if (container) {
+            container.style.maxWidth = stepId === 'step-playlist' ? '1300px' : '600px';
+            if (stepId === 'step-playlist') container.classList.add('container-wide');
+            else container.classList.remove('container-wide');
+        }
+        ['step-select', 'step-decision', 'step-dashboard', 'step-playlist'].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) el.classList.add('d-none');
+        });
+        const target = document.getElementById(stepId);
+        if(target) target.classList.remove('d-none');
+
+        if (stepId === 'step-dashboard') {
+            this.renderFolderList();
+            setTimeout(() => this.updateFloatingBar(), 150); 
+        } else if (stepId === 'step-playlist') {
+            if (typeof this.showPlaylistReview === 'function') this.showPlaylistReview();
+            if (this.selectionBar) this.selectionBar.classList.remove('active');
+        } else {
+            if (this.selectionBar) this.selectionBar.classList.remove('active');
+        }
+    }
+
+    renderFolderList(filesToRender) {
+        const listContainer = document.getElementById('folders-list');
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+        listContainer.onclick = (e) => {
+            if (e.target.classList.contains('folder-checkbox')) {
+                this.toggleFolderSelection({id: e.target.value, name: e.target.dataset.name}, e.target.checked);
+            }
+        };
+
+        const foldersToShow = filesToRender || this.allFolders || [];
+        if (foldersToShow.length === 0) {
+            listContainer.innerHTML = '<div class="text-white-50 text-center small mt-3">No hay carpetas.</div>';
+            return;
+        }
+
+        foldersToShow.forEach(folder => {
+            const lastChar = folder.name.slice(-1).toUpperCase();
+            let borderClass = lastChar === 'A' ? 'border-intensity-A' : (lastChar === 'M' ? 'border-intensity-M' : 'border-intensity-B');
+            const isChecked = this.playlistSelection.has(folder.id) ? 'checked' : '';
+
+            const div = document.createElement('div');
+            div.className = `folder-item ${borderClass} d-flex align-items-center mb-2`;
+            
+            div.addEventListener('dragover', (e) => { e.preventDefault(); div.classList.add('drag-over'); });
+            div.addEventListener('dragleave', () => { div.classList.remove('drag-over'); });
+            div.addEventListener('drop', (e) => {
+                e.preventDefault(); div.classList.remove('drag-over');
+                this.currentFolderId = folder.id; // Importante para saber dónde subir
+                this.handleFileUpload(e.dataTransfer.files);
+            });
+
+            div.innerHTML = `
+                <div class="me-3">
+                    <input class="form-check-input folder-checkbox" type="checkbox" value="${folder.id}" data-name="${folder.name}" ${isChecked} style="transform: scale(1.3); cursor:pointer;">
+                </div>
+                <div class="flex-grow-1 clickable-folder px-2 py-1" onclick="clinicManager.viewFolderContent('${folder.id}', '${folder.name}')">
+                    <div class="fw-bold text-white small text-truncate pointer-events-none">${folder.name}</div>
+                    <div class="text-white-50" style="font-size:0.7rem" id="count-${folder.id}">...</div>
+                </div>
+                <div class="btn-group ms-2">
+                    <button class="btn btn-outline-warning btn-sm px-2" onclick="clinicManager.editIntensity('${folder.id}', '${folder.name}')">✏️</button>
+                    <button class="btn btn-outline-danger btn-sm px-2" onclick="clinicManager.deleteFolderById('${folder.id}', '${folder.name}', event)">🗑️</button>
+                </div>
+            `;
+            listContainer.appendChild(div);
+            this.countVideos(folder.id);
+        });
+    }
+
+    toggleFolderSelection(folder, isChecked) {
+        if (isChecked) this.playlistSelection.set(folder.id, folder);
+        else this.playlistSelection.delete(folder.id);
+        this.updateFloatingBar();
+    }
+
+    updateFloatingBar() {
+        if (!this.selectionBar) return;
+        const count = this.playlistSelection.size;
+        document.getElementById('selection-count').innerText = count;
+        const isPlaylistActive = !document.getElementById('step-playlist')?.classList.contains('d-none');
+        if (count > 0 && !isPlaylistActive) {
+            this.selectionBar.style.display = "flex";
+            setTimeout(() => this.selectionBar.classList.add('active'), 10);
+        } else {
+            this.selectionBar.classList.remove('active');
+            setTimeout(() => { if (!this.selectionBar.classList.contains('active')) this.selectionBar.style.display = "none"; }, 500);
+        }
+    }
+
+    showPlaylistReview() {
+        const container = document.getElementById('playlist-preview-list');
+        if (!container) return;
+        container.innerHTML = '';
+        if (this.playlistSelection.size === 0) return container.innerHTML = `<div class="text-center py-4 text-white-50 small">Vacío</div>`;
+        
+        this.playlistSelection.forEach((folder) => {
+            const item = document.createElement('div');
+            item.className = 'playlist-item d-flex justify-content-between align-items-center p-2 mb-2 bg-white bg-opacity-10 border-start border-info border-3 rounded animate-fade-in';
+            item.innerHTML = `
+                <div class="ps-2"><div class="text-white fw-bold small">📂 ${folder.name}</div></div>
+                <button class="btn btn-link text-danger p-0 me-2" onclick="clinicManager.removeFromPlaylist('${folder.id}')">&times;</button>
+            `;
+            container.appendChild(item);
+        });
+    }
+
+    removeFromPlaylist(id) {
+        this.playlistSelection.delete(id);
+        this.updateFloatingBar();
+        this.showPlaylistReview(); 
+    }
+
+    async countVideos(folderId) {
+        const cleanId = String(folderId).split(',')[0].trim();
+        try {
+            const q = `'${cleanId}' in parents and mimeType contains 'video/' and trashed = false`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`;
+            const res = await this.safeDriveFetch(url); 
+            const data = await res.json();
+            const countEl = document.getElementById(`count-${folderId}`);
+            if(countEl) countEl.innerText = `${data.files ? data.files.length : 0} videos`;
+        } catch (e) { }
+    }
+
+    async editIntensity(id, oldName) {
+        const cleanId = String(id).split(',')[0].trim();
+        const baseName = oldName.slice(0, -1); 
+        const newInt = prompt(`Cambiar prioridad (A, M, B):`, oldName.slice(-1));
+        if (!newInt || !['A', 'M', 'B'].includes(newInt.toUpperCase())) return;
+        try {
+            await this.safeDriveFetch(`https://www.googleapis.com/drive/v3/files/${cleanId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ name: baseName + newInt.toUpperCase() })
+            });
+            this.loadDashboard();
+        } catch (e) { alert("Error al editar."); }
+    }
+
+    initSearch() {
+        const searchInput = document.getElementById('folder-search-input');
+        if(!searchInput) return;
+        searchInput.addEventListener('input', (e) => {
+            const text = e.target.value.toUpperCase().trim();
+            if (text === "") { this.renderFolderList(this.allFolders); return; }
+            this.renderFolderList(this.allFolders.filter(f => f.name.toUpperCase().includes(text)));
+        });
+    }
+
+    updatePreview() {
+        const topic = document.getElementById('new-topic').value;
+        const idRaw = document.getElementById('new-id').value;
+        const intensity = document.querySelector('input[name="intensity-btn"]:checked')?.value || 'M';
+        let prefix = this.selectedClinicName ? this.selectedClinicName.replace(/\s+/g, '').substring(0, 3).toUpperCase() : "GEN";
+        const code = `${prefix}${topic}${idRaw.padStart(2, '0')}${intensity}`;
+        const previewEl = document.getElementById('code-preview');
+        if(previewEl) previewEl.innerText = code;
+        return code;
+    }
+    
+    backToDecision() { this.showStep('step-decision'); }
+    reset() {
+        this.selectedClinicName = null;
+        this.selectedFolderId = null;
+        localStorage.removeItem('savedClinicName');
+        localStorage.removeItem('savedClinicId');
+        this.playlistSelection.clear();
+        this.showStep('step-select');
     }
 }
 
 
 class VideoPlayer {
     constructor() {
-        this.videoElement = document.getElementById('main-player');
-        this.rootFolderId = null;
+        // Buscamos el video por ID (asegúrate que en tu HTML sea 'main-video' o 'main-player')
+        this.videoElement = document.getElementById('main-video') || document.getElementById('main-player');
+        
+        // Referencias a la UI (NUEVO: Necesario para quitar la pantalla negra)
+        this.container = document.getElementById('video-container');
+        this.menu = document.getElementById('clinic-menu');
+        this.weatherWidget = document.getElementById('weather-widget');
+
+        // Variables de Estado (TU CÓDIGO)
+        this.queue = [];          
+        this.currentIndex = 0;    
         
         this.fadeStarted = false;
         this.audioFadeStarted = false;
         this.audioFadeInterval = null;
         this.isLoading = false; 
-        
-        this.lastFolderId = null; 
-        this.playedHistory = new Set();
-        this.videoCache = {}; 
-        
-        this.folders = { alta: [], media: [], baja: [] };
-        this.allowedFolderIds = null;
-        this.currentObjectUrl = null;
+        this.currentObjectUrl = null; 
 
+        // Eventos del Video
         if (this.videoElement) {
-            this.videoElement.onended = () => this.onVideoEnded();
-            this.videoElement.onerror = () => {
-                console.error("❌ Error playback, recuperando...");
+            // Usamos 'addEventListener' para ser más seguros
+            this.videoElement.addEventListener('ended', () => this.onVideoEnded());
+            
+            this.videoElement.addEventListener('error', (e) => {
+                console.error("❌ Error playback, recuperando...", e);
                 this.resetFlags();
-                setTimeout(() => this.playNextCycle(), 2000);
-            };
+                // Intentar el siguiente rápidamente
+                setTimeout(() => this.playNextCycle(), 1000);
+            });
         }
+    }
+
+    // --- 1. FUNCIÓN DE ENTRADA (MODIFICADA PARA UI) ---
+    startQueue(generatedList) {
+        // 1. Validaciones
+        if (!generatedList || generatedList.length === 0) return alert("Lista vacía");
+
+        // 2. Detener reproducción anterior
+        if (this.videoElement) {
+            this.videoElement.pause();
+            this.resetFlags();
+        }
+
+        // 3. Cargar nueva lista
+        this.queue = generatedList;
+        this.currentIndex = 0;
+        console.log(`📺 Player recibió ${this.queue.length} videos.`);
+
+        // 4. MANEJO DE INTERFAZ (¡ESTO SOLUCIONA LA PANTALLA NEGRA!)
+        // A. Subimos el menú
+        if (this.menu) this.menu.classList.add('slide-up');
         
-        this.lastPriorityUpdate = { alta: Date.now(), media: Date.now() };
+        // B. Mostramos el contenedor de video (quitamos d-none)
+        if (this.container) {
+            this.container.classList.remove('d-none');
+            this.container.classList.add('d-block');
+        }
+
+        // C. Aseguramos que el clima se vea
+        if (this.weatherWidget) this.weatherWidget.style.display = 'block';
+
+        // 5. Arrancar el ciclo
+        this.playNextCycle();
     }
 
     resetFlags() {
@@ -1056,20 +939,30 @@ class VideoPlayer {
             clearInterval(this.audioFadeInterval);
             this.audioFadeInterval = null;
         }
-        if (this.videoElement) this.videoElement.volume = 1;
+        if (this.videoElement) {
+            this.videoElement.volume = 1;
+            this.videoElement.classList.remove('video-fade-out'); // Limpiar clase CSS
+        }
     }
 
     onVideoEnded() {
         if (this.fadeStarted) return;
         this.fadeStarted = true;
         
+        console.log("🏁 Video terminado. Iniciando transición...");
+
+        // Iniciar Fade de Audio
         if (!this.audioFadeStarted) {
             this.audioFadeStarted = true;
-            this.fadeOutAudio(4); 
+            this.fadeOutAudio(2); // Reducido a 2s para agilidad (opcional)
         }
         
-        this.videoElement.classList.add('video-fade-out');
-        setTimeout(() => this.playNextCycle(), 4000);
+        // Iniciar Fade de Video (CSS)
+        if (this.videoElement) this.videoElement.classList.add('video-fade-out');
+        
+        // Esperamos un momento breve y lanzamos el siguiente
+        // (Coordinado con la animación CSS)
+        setTimeout(() => this.playNextCycle(), 1000); 
     }
 
     fadeOutAudio(duration) {
@@ -1083,187 +976,102 @@ class VideoPlayer {
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / (duration * 1000), 1);
             const easeOut = 1 - Math.pow(1 - progress, 3);
-            this.videoElement.volume = Math.max(0, startVolume * (1 - easeOut));
+            
+            // Evitar errores si el video ya no existe
+            if(this.videoElement) {
+                this.videoElement.volume = Math.max(0, startVolume * (1 - easeOut));
+            }
             
             if (progress >= 1) {
                 clearInterval(this.audioFadeInterval);
-                this.videoElement.volume = 0;
+                if(this.videoElement) this.videoElement.volume = 0;
             }
-        }, 30);
+        }, 50);
     }
 
-    init(folderId, allowedIds = null) {
-        this.rootFolderId = folderId;
-        this.allowedFolderIds = allowedIds; 
-        this.videoCache = {}; 
-        this.playedHistory.clear(); 
-        this.scanFolders();
-    }
-
-    async scanFolders() {
-        try {
-            const q = `'${this.rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
-            const headers = (window.clinicManager && window.clinicManager.accessToken) ? { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } : {};
-            
-            const res = await fetch(url, { headers });
-            const data = await res.json();
-
-            this.folders = { alta: [], media: [], baja: [] };
-            let foldersToProcess = data.files || [];
-
-            if (this.allowedFolderIds && this.allowedFolderIds.length > 0) {
-                foldersToProcess = foldersToProcess.filter(f => this.allowedFolderIds.includes(f.id));
-            }
-
-            foldersToProcess.forEach(f => {
-                const name = f.name.toUpperCase();
-                if (name.endsWith('A')) this.folders.alta.push(f.id);
-                else if (name.endsWith('M')) this.folders.media.push(f.id);
-                else this.folders.baja.push(f.id);
-            });
-
-            console.log("📂 Playlist armada con estructura:", this.folders);
-            this.playNextCycle(); 
-        } catch (e) {
-            console.error("Error scan:", e);
-            setTimeout(() => this.playNextCycle(), 5000);
-        }
-    }
-
+    // --- 2. CICLO Y LOGICA ---
     async playNextCycle() {
-        if (this.isLoading) return;
+        // Evitar doble carga simultánea
+        if (this.isLoading && this.currentObjectUrl) return; 
+        
         this.isLoading = true;
+        this.resetFlags(); // Reseteamos volumen y clases antes de cargar
 
-        const now = Date.now();
-        let targetFolderId = null;
-
-        if (this.folders.alta.length > 0 && (now - this.lastPriorityUpdate.alta >= 300000)) { 
-            targetFolderId = this.getRandomFolder(this.folders.alta);
-            if (targetFolderId) this.lastPriorityUpdate.alta = now;
-        } 
-        else if (this.folders.media.length > 0 && (now - this.lastPriorityUpdate.media >= 480000)) { 
-            targetFolderId = this.getRandomFolder(this.folders.media);
-            if (targetFolderId) this.lastPriorityUpdate.media = now;
-        } 
-        else {
-            let pool = [...this.folders.baja];
-            if (pool.length === 0) pool = [...this.folders.media, ...this.folders.alta];
-            
-            if (pool.length > 1 && this.lastFolderId) {
-                pool = pool.filter(id => id !== this.lastFolderId);
-            }
-            targetFolderId = this.getRandomFolder(pool);
-        }
-
-        this.lastFolderId = targetFolderId;
-
-        if (targetFolderId) {
-            await this.loadVideoFromFolder(targetFolderId);
-        } else {
-            console.log("⚠️ No hay carpetas disponibles en la playlist.");
+        if (!this.queue || this.queue.length === 0) {
+            console.warn("⚠️ Lista vacía.");
             this.isLoading = false;
-            setTimeout(() => this.playNextCycle(), 5000);
+            return;
         }
-    }
 
-    getRandomFolder(list) {
-        if (!list || list.length === 0) return null;
-        return list[Math.floor(Math.random() * list.length)];
-    }
-
-    async loadVideoFromFolder(folderId) {
-        try {
-            if (!this.videoCache[folderId]) {
-                const q = `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`;
-                const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&key=${CONFIG.apiKey}&fields=files(id,name)`;
-                const headers = (window.clinicManager && window.clinicManager.accessToken) ? { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } : {};
-                
-                const res = await fetch(url, { headers });
-                const data = await res.json();
-                
-                if (!data.files || data.files.length === 0) {
-                    this.videoCache[folderId] = []; 
-                    this.isLoading = false;
-                    return this.playNextCycle(); 
-                }
-                
-                this.videoCache[folderId] = data.files;
-            }
-
-            const allVideos = this.videoCache[folderId];
-            if (allVideos.length === 0) {
-                this.isLoading = false;
-                return this.playNextCycle();
-            }
-
-            // Lógica No-Repeat Video
-            let candidates = allVideos.filter(v => !this.playedHistory.has(v.id));
-
-            if (candidates.length === 0) {
-                console.log("♻️ Reiniciando historial de carpeta.");
-                allVideos.forEach(v => this.playedHistory.delete(v.id));
-                candidates = [...allVideos];
-            }
-
-            const selectedVideo = candidates[Math.floor(Math.random() * candidates.length)];
-            this.playedHistory.add(selectedVideo.id);
-
-            await this.playVideoFile(selectedVideo);
-
-        } catch (error) {
-            console.error("Error cargando video:", error);
-            this.resetFlags();
-            setTimeout(() => this.playNextCycle(), 2000);
+        // Loop Infinito
+        if (this.currentIndex >= this.queue.length) {
+            console.log("🔄 Reiniciando lista...");
+            this.currentIndex = 0;
         }
+
+        const nextVideo = this.queue[this.currentIndex];
+        this.currentIndex++; // Avanzamos índice
+
+        await this.playVideoFile(nextVideo);
     }
 
+    // --- 3. CARGA (BLOB) ---
     async playVideoFile(video) {
-        if (!this.videoElement) return;
+    if (!this.videoElement) return;
 
-        this.videoElement.classList.add('video-fade-out');
-        await new Promise(r => setTimeout(r, 500));
+    console.log(`🎬 Intentando cargar: ${video.name}`);
+    this.isLoading = true;
 
-        try {
-            this.videoElement.pause();
-            this.videoElement.volume = 1;
-            
-            if (this.currentObjectUrl) {
-                URL.revokeObjectURL(this.currentObjectUrl);
-                this.currentObjectUrl = null;
-            }
+    try {
+        // 1. Obtener Token
+        const token = localStorage.getItem('google_access_token');
+        if (!token) throw new Error("No hay token");
 
-            this.videoElement.removeAttribute('src');
-            this.videoElement.load();
+        // 2. Descarga del Blob
+        const response = await fetch(`https://www.googleapis.com/drive/v3/files/${video.id}?alt=media`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
 
-            const videoUrl = `https://www.googleapis.com/drive/v3/files/${video.id}?key=${CONFIG.apiKey}&alt=media`;
-
-            if (window.clinicManager && window.clinicManager.accessToken) {
-                const res = await fetch(videoUrl, { headers: { 'Authorization': `Bearer ${window.clinicManager.accessToken}` } });
-                if (res.ok) {
-                    const blob = await res.blob();
-                    this.currentObjectUrl = URL.createObjectURL(blob);
-                    this.videoElement.src = this.currentObjectUrl;
-                } else {
-                    this.videoElement.src = videoUrl; 
-                }
-            } else {
-                this.videoElement.src = videoUrl;
-            }
-
-            await this.videoElement.play();
-            this.videoElement.classList.remove('video-fade-out');
-            console.log(`🎬 PLAY: ${video.name}`);
-            
-            this.resetFlags();
-
-        } catch (e) {
-            console.warn("Autoplay error:", e);
-            this.videoElement.classList.remove('video-fade-out');
-            this.resetFlags();
+        if (!response.ok) {
+            // Si da 403 o 404, saltamos este video
+            console.error(`❌ Error en Drive: ${response.status}`);
+            this.isLoading = false;
             this.playNextCycle();
+            return;
         }
+
+        const blob = await response.blob();
+        
+        // Limpiar URL anterior para no saturar la memoria RAM
+        if (this.currentObjectUrl) URL.revokeObjectURL(this.currentObjectUrl);
+        
+        this.currentObjectUrl = URL.createObjectURL(blob);
+
+        // 3. Preparar el elemento de video antes de asignar la fuente
+        this.videoElement.style.opacity = "0"; // Lo ocultamos un milisegundo
+        this.videoElement.src = this.currentObjectUrl;
+
+        // 4. Evento: Cuando el primer fotograma esté listo
+        this.videoElement.onloadeddata = () => {
+            this.videoElement.play().then(() => {
+                this.videoElement.style.opacity = "1"; // ¡Aparece!
+                this.isLoading = false;
+                console.log("✅ Reproduciendo ahora.");
+            }).catch(err => {
+                console.warn("Autoplay bloqueado, intentando sin audio...");
+                this.videoElement.muted = true;
+                this.videoElement.play();
+                this.videoElement.style.opacity = "1";
+                this.isLoading = false;
+            });
+        };
+
+    } catch (error) {
+        console.error("❌ Error fatal cargando archivo:", error);
+        this.isLoading = false;
+        setTimeout(() => this.playNextCycle(), 2000);
     }
+}
 }
 
 function updateClock() {
@@ -1473,6 +1281,7 @@ function guardarPlaylistDesdeUI() {
 function renderSavedPlaylists() {
     const container = document.getElementById('saved-playlists-container');
     
+    // Validación de seguridad
     if (!container || !window.scheduleManager) return;
 
     const playlists = window.scheduleManager.playlists || [];
@@ -1485,25 +1294,35 @@ function renderSavedPlaylists() {
 
     playlists.forEach(p => {
         const item = document.createElement('div');
-        // Usamos flex para separar info del botón borrar
+        // Mantenemos exactamente tus clases de diseño originales
         item.className = 'd-flex justify-content-between align-items-center bg-dark border border-secondary p-1 px-2 rounded mb-1';
     
-    item.innerHTML = `
-        <div class="d-flex align-items-center flex-grow-1" style="cursor: pointer;" onclick="verDetallesPlaylist('${p.id}')">
-            <div class="me-2 fs-5">💿</div> 
-            <div class="overflow-hidden">
-                <div class="d-flex align-items-center">
-                    <span class="text-warning fw-bold text-truncate me-2" style="max-width: 120px;">${p.name}</span>
-                    <span class="text-white-50 small" style="font-size: 0.75rem;">(${p.folders.length} carpetas)</span>
+        item.innerHTML = `
+            <div class="d-flex align-items-center flex-grow-1" style="cursor: pointer;" onclick="verDetallesPlaylist('${p.id}')">
+                <div class="me-2 fs-5">💿</div> 
+                <div class="overflow-hidden">
+                    <div class="d-flex align-items-center">
+                        <span class="text-warning fw-bold text-truncate me-2" style="max-width: 120px;">${p.name}</span>
+                        <span class="text-white-50 small" style="font-size: 0.75rem;">(${p.folders.length} carpetas)</span>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <button class="btn btn-outline-danger btn-sm py-0 px-2" onclick="borrarPlaylist('${p.id}', event)" title="Eliminar">
-            ×
-        </button>
-    `;
-    container.appendChild(item);
+            <div class="d-flex align-items-center gap-1">
+                <button class="btn btn-outline-success btn-sm py-0 px-2 me-1" 
+                        onclick="event.stopPropagation(); activarPlaylist('${p.id}')" 
+                        title="Poner en pantalla ahora">
+                    ▶ Activar
+                </button>
+
+                <button class="btn btn-outline-danger btn-sm py-0 px-2" 
+                        onclick="borrarPlaylist('${p.id}', event)" 
+                        title="Eliminar">
+                    ×
+                </button>
+            </div>
+        `;
+        container.appendChild(item);
     });
 }
 
@@ -1658,3 +1477,109 @@ function reproducirPlaylistActual() {
     // Aquí es donde en el futuro llamarás a tu función de pantalla completa
     // Por ejemplo: iniciarReproductor(playlistSeleccionadaParaReproducir.folders);
 }
+
+function desactivarProgramacion() {
+    if(!confirm("¿Deseas quitar la programación activa?")) return;
+
+    // 1. Borrar de la memoria
+    localStorage.removeItem('activeScheduleData');
+    window.currentPlaylistSelection = []; // Limpiar variable del TV
+
+    // 2. Limpiar UI (volver al mensaje "No hay programación")
+    const activeContainer = document.getElementById('schedule-list');
+    if(activeContainer) {
+        activeContainer.innerHTML = '<div class="text-center text-muted py-4 small">No hay programación definida.</div>';
+    }
+
+    // 3. Limpiar fechas
+    document.getElementById('date-start').value = '';
+    document.getElementById('date-end').value = '';
+}
+
+
+function cargarProgramacionVisual(playlist) {
+    // 1. Configurar variable global para el reproductor
+    window.currentPlaylistSelection = playlist.folders;
+
+    // 2. Rellenar fechas en el calendario
+    const startInput = document.getElementById('date-start');
+    const endInput = document.getElementById('date-end');
+    if(startInput) startInput.value = playlist.start;
+    if(endInput) endInput.value = playlist.end;
+
+    // 3. Dibujar la TARJETA LIMPIA (Sin códigos raros)
+    const activeContainer = document.getElementById('schedule-list');
+    
+    if (activeContainer) {
+        activeContainer.innerHTML = ''; 
+
+        // Calculamos la cantidad de items para mostrar un resumen
+        const count = playlist.folders.length;
+        
+        // Creamos una tarjeta minimalista
+        const card = document.createElement('div');
+        // Usamos un degradado suave verde para que se vea moderno
+        card.className = "position-relative p-3 rounded border border-success";
+        card.style.background = "linear-gradient(45deg, rgba(25, 135, 84, 0.2), rgba(20, 20, 20, 0.8))";
+        
+        card.innerHTML = `
+            <button onclick="desactivarProgramacion()" 
+                    class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-2 border-0" 
+                    title="Quitar programación" style="font-size: 1.2rem; line-height: 1;">
+                &times;
+            </button>
+
+            <div class="d-flex align-items-center">
+                <div class="me-3 text-success">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" class="bi bi-play-circle-fill" viewBox="0 0 16 16">
+                        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/>
+                    </svg>
+                </div>
+                
+                <div>
+                    <h5 class="m-0 fw-bold text-white">${playlist.name}</h5>
+                    <div class="text-white-50 small mt-1">
+                        <span class="badge bg-success bg-opacity-75 me-1">${count} Carpetas</span>
+                        <span>Listo para transmitir</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="progress mt-3" style="height: 4px; background-color: rgba(255,255,255,0.1);">
+                <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+            </div>
+        `;
+        
+        activeContainer.appendChild(card);
+    }
+}
+
+function activarPlaylist(id, event) {
+    if (event) event.stopPropagation();
+
+    const playlist = window.scheduleManager.playlists.find(p => p.id === id);
+    if (!playlist) return alert("❌ Error: Playlist no encontrada.");
+
+    // 1. GUARDAR EN MEMORIA PERMANENTE (localStorage)
+    localStorage.setItem('activeScheduleData', JSON.stringify(playlist));
+
+    // 2. Ejecutar la función que "pinta" la pantalla y configura el TV
+    cargarProgramacionVisual(playlist);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const savedData = localStorage.getItem('activeScheduleData');
+    if (savedData) {
+        try {
+            const playlist = JSON.parse(savedData);
+            console.log("🔄 Restaurando programación activa:", playlist.name);
+            
+            // Damos un pequeño retraso para asegurar que clinicManager haya cargado las carpetas
+            setTimeout(() => {
+                cargarProgramacionVisual(playlist);
+            }, 1000); 
+        } catch (e) {
+            console.error("Error recuperando programación", e);
+        }
+    }
+});
