@@ -59,9 +59,10 @@ body, html {
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 20px;
     box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-    width: 1400px !important;
-    max-width: 95vw !important;
-    transition: max-width 0.5s ease-in-out;
+    /* COMPACTO por defecto (clínicas + dashboard) */
+    width: 600px;
+    max-width: 95vw;
+    transition: max-width 0.5s ease-in-out, width 0.5s ease-in-out;
     max-height: 95vh !important;
     overflow: hidden; 
     overflow-y: auto !important;
@@ -102,14 +103,15 @@ body, html {
 }
 
 .player-section {
-    position: relative;
-    flex: 1; 
+    flex: 1;           /* Ocupa el espacio restante automáticamente */
+    height: 100vh;     /* Altura completa siempre */
+    min-width: 0;      /* CRUCIAL: Evita que el video fuerce el ancho y rompa el flex */
     background-color: #000;
-    overflow: hidden;
-    display: flex; 
-    justify-content: center;
+    display: flex;     /* Para centrar el video perfectamente */
     align-items: center;
-    transition: all 0.5s ease-in-out;
+    justify-content: center;
+    transition: width 0.5s ease; /* Suaviza el "empujón" cuando sale la barra */
+    position: relative;
 }
 
 .main-video {
@@ -442,6 +444,31 @@ body, html {
     background-color: #000;
 }
 
+/* Estado de video en procesamiento (sin miniatura de Drive aún) */
+.processing-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,0.08),
+        rgba(255,255,255,0.08) 10px,
+        rgba(0,0,0,0.4) 10px,
+        rgba(0,0,0,0.4) 20px
+    );
+    color: #fff;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+}
+
+.processing-label {
+    background: rgba(0,0,0,0.7);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
 /* 3. Etiquetas (VIDEO / FOTO) */
 .file-type-badge {
     position: absolute;
@@ -540,9 +567,10 @@ input[type="date"] {
     margin-bottom: 8px;
 }
 
+/* ANCHO solo para la pantalla de PROGRAMACIÓN (step-playlist) */
 .menu-container.container-wide {
     max-width: 1300px !important; 
-    width: 95vw !important; /* Esto obliga a usar casi todo el ancho de la pantalla */
+    width: 95vw !important; /* usa casi todo el ancho de pantalla */
     transition: all 0.5s ease-in-out;
 }
 
@@ -566,13 +594,7 @@ input[type="date"] {
     max-width: 100% !important;
 }
 
-/* Mejora la visualización en la vista ancha */
-.menu-container.container-wide {
-    max-width: 1300px !important; 
-    width: 95vw !important;
-    display: flex;
-    flex-direction: column;
-}
+/* (Eliminado bloque duplicado de .menu-container.container-wide) */
 
 /* Aseguramos que la barra siempre esté por encima de todo */
 .floating-bar {
@@ -636,4 +658,100 @@ input[type="date"] {
     transform: scale(0.145); /* Escala para ajustar 1920 a 280px */
     transform-origin: top left;
     pointer-events: none; /* Evita que se pueda hacer clic dentro */
+}
+
+/* --- AJUSTE ESTÉTICO PARA CONTADORES DE CARPETA --- */
+
+/* Contenedor del contador */
+.clickable-folder .text-white-50 {
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Espacio entre bloques y videos */
+    margin-top: 2px;
+    font-family: 'Montserrat', sans-serif;
+    letter-spacing: 0.3px;
+    font-weight: 400;
+}
+
+/* Estilo para el número de bloques (Cyan) */
+.clickable-folder span[style*="color: #0dcaf0"] {
+    background: rgba(13, 202, 240, 0.1); /* Fondo muy suave para resaltar */
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+}
+
+/* Separador "|" */
+.clickable-folder .text-white-50::after {
+    content: "";
+    /* Si decides no usar el "|" en el JS, puedes hacerlo con CSS aquí */
+}
+
+/* Efecto al pasar el mouse sobre la carpeta principal */
+.folder-item:hover #count-container {
+    color: #ffffff !important;
+    transition: color 0.3s ease;
+}
+
+/* Animación sutil de carga cuando aparece el contador */
+@keyframes fadeInStats {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+[id^="count-"] {
+    animation: fadeInStats 0.5s ease-in;
+}
+
+.player-section.is-horizontal-mode {
+    background-color: #000; /* Negro puro para que se funda con las barras negras si las hay */
+    transition: background 0.8s ease; /* Cambio suave de color */
+}
+
+/* 2. MODO VERTICAL (Diseño Corporativo) */
+.player-section.is-vertical-mode {
+    /* Usamos tus variables para un degradado radial elegante */
+    background: radial-gradient(
+        circle at center, 
+        var(--clinic-blue-mid) 0%, 
+        var(--clinic-blue-deep) 70%, 
+        #000 100%
+    );
+    position: relative; /* Necesario para el efecto de viñeta */
+    transition: background 0.8s ease;
+}
+
+/* 3. TRUCO VISUAL: Viñeta para el modo vertical
+   Oscurece las esquinas del fondo azul para centrar la atención en el video */
+.player-section.is-vertical-mode::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(transparent 40%, rgba(0,0,0,0.6) 100%);
+    pointer-events: none; /* Deja pasar los clicks */
+    z-index: 0;
+}
+
+/* 4. EL VIDEO MISMO */
+.main-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* NUNCA deforma ni corta el video */
+    display: block;
+    position: relative;
+    z-index: 1; /* Para que quede encima de la viñeta */
+    transition: filter 0.5s ease;
+}
+
+/* Sombra especial SOLO para videos verticales
+   Hace que el video "flote" sobre el fondo azul */
+.player-section.is-vertical-mode .main-video {
+    /* drop-shadow es mejor que box-shadow porque sigue el contorno del video,
+       no del contenedor rectangular transparente */
+    filter: drop-shadow(0 0 40px rgba(0, 0, 0, 0.8));
 }
