@@ -1598,15 +1598,19 @@ async renderSubfolderFiles(folderId) {
 
 class VideoPlayer {
     constructor() {
-        // Buscamos el video por ID (asegúrate que en tu HTML sea 'main-video' o 'main-player')
         this.videoElement = document.getElementById('main-video') || document.getElementById('main-player');
         
-        // Referencias a la UI (NUEVO: Necesario para quitar la pantalla negra)
+        // Evitar que el video reproduzca o muestre nada hasta que el usuario pulse "INICIAR TV"
+        if (this.videoElement) {
+            this.videoElement.pause();
+            this.videoElement.removeAttribute('src');
+            this.videoElement.load();
+        }
+
         this.container = document.getElementById('video-container');
         this.menu = document.getElementById('clinic-menu');
         this.weatherWidget = document.getElementById('weather-widget');
 
-        // Variables de Estado (TU CÓDIGO)
         this.queue = [];          
         this.currentIndex = 0;    
 
@@ -1638,8 +1642,8 @@ class VideoPlayer {
             this.videoElement.addEventListener('error', (e) => {
                 console.error("❌ Error playback, recuperando...", e);
                 this.resetFlags();
-                // Intentar el siguiente rápidamente
-                setTimeout(() => this.playNextCycle(), 1000);
+                const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
+                setTimeout(next, 1000);
             });
         }
     }
@@ -1682,7 +1686,8 @@ class VideoPlayer {
         console.log(`   - MEDIA: ${this.videosMEDIA.length} videos (cada 10 minutos)`);
         console.log(`   - Total: ${total} videos`);
 
-        // 4. MANEJO DE INTERFAZ
+        // 4. MANEJO DE INTERFAZ (solo al dar INICIAR TV: menú arriba, sidebar/clima visibles)
+        document.body.classList.add('tv-started');
         if (this.menu) this.menu.classList.add('slide-up');
         if (this.container) {
             this.container.classList.remove('d-none');
@@ -1711,7 +1716,8 @@ class VideoPlayer {
         this.intensityMode = false;
         console.log(`📺 Player recibió ${this.queue.length} videos (modo legacy).`);
 
-        // 4. MANEJO DE INTERFAZ
+        // 4. MANEJO DE INTERFAZ (solo al dar INICIAR TV)
+        document.body.classList.add('tv-started');
         if (this.menu) this.menu.classList.add('slide-up');
         if (this.container) {
             this.container.classList.remove('d-none');
@@ -2379,62 +2385,86 @@ function verDetallesPlaylist(id) {
     const playlist = window.scheduleManager.playlists.find(p => p.id === id);
     if (!playlist) return;
 
-    playlistSeleccionadaParaReproducir = playlist; 
+    playlistSeleccionadaParaReproducir = playlist;
 
-    // 1. Rellenar datos básicos
     document.getElementById('modalPlaylistName').innerText = playlist.name;
     document.getElementById('modalPlaylistDates').innerText = `${playlist.start} al ${playlist.end}`;
     document.getElementById('modalPlaylistCount').innerText = `${playlist.folders.length} Carpeta(s)`;
 
     const contentDiv = document.getElementById('modalPlaylistContent');
-    contentDiv.innerHTML = ''; 
+    contentDiv.innerHTML = '';
 
-    // 2. Listar solo NOMBRES de carpetas
+    let totalVideosCount = 0;
+    const totalEl = document.createElement('p');
+    totalEl.id = 'playlist-modal-total-videos';
+    totalEl.className = 'text-white-50 small mt-3 mb-0';
+    totalEl.style.opacity = '0.85';
+    totalEl.innerText = 'Total: — videos';
+    contentDiv.appendChild(totalEl);
+
+    const onFolderDone = (count) => {
+        totalVideosCount += count;
+        totalEl.innerText = `Total: ${totalVideosCount} videos`;
+    };
+
     playlist.folders.forEach(folderId => {
-        // Buscamos el nombre real en la memoria del gestor
-        const folderData = window.clinicManager.allFolders ? window.clinicManager.allFolders.find(f => f.id === folderId) : null;
-        
-        // Si por alguna razón no tenemos el nombre, usamos "Carpeta de Playlist" en lugar del ID feo
+        const folderData = window.clinicManager && window.clinicManager.allFolders
+            ? window.clinicManager.allFolders.find(f => f.id === folderId) : null;
         const folderName = folderData ? folderData.name : "Carpeta de Playlist";
 
         const folderEl = document.createElement('div');
         folderEl.className = 'bg-secondary bg-opacity-10 p-2 rounded mb-2 border-start border-info border-3';
         folderEl.innerHTML = `
             <div class="fw-bold text-info small">📁 ${folderName}</div>
-            <div class="ps-3 small text-white-50 mt-1" id="videos-of-${folderId}" style="font-size: 0.8rem;">
-                <span class="spinner-border spinner-border-sm" style="width: 10px; height: 10px;"></span> Listando videos...
+            <div class="ps-3 mt-1 d-flex align-items-center gap-2 flex-wrap">
+                <span id="count-of-${folderId}" class="small text-white-50">— videos</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size: 0.75rem;" onclick="togglePlaylistFolderList('${folderId}')" id="btn-toggle-${folderId}">▼ Ver lista</button>
             </div>
+            <div id="list-of-${folderId}" class="ps-3 mt-1 small text-white-50" style="display:none; font-size: 0.8rem;"></div>
         `;
-        contentDiv.appendChild(folderEl);
+        contentDiv.insertBefore(folderEl, totalEl);
 
-        // Llamamos a Drive para traer los videos
-        obtenerVideosDeCarpeta(folderId, `videos-of-${folderId}`);
+        obtenerVideosDeCarpeta(folderId, onFolderDone);
     });
 
-    // 3. Lanzar el modal
     const modalElement = document.getElementById('playlistDetailsModal');
     const myModal = new bootstrap.Modal(modalElement);
     myModal.show();
 }
 
-// Función auxiliar para listar los videos dentro del modal
-async function obtenerVideosDeCarpeta(folderId, elementId) {
+// Lista videos de una carpeta (incluye subcarpetas/bloques). Actualiza count + lista oculta; el usuario despliega con "Ver lista".
+async function obtenerVideosDeCarpeta(folderId, onDone) {
+    const countEl = document.getElementById(`count-of-${folderId}`);
+    const listEl = document.getElementById(`list-of-${folderId}`);
+    if (!countEl || !listEl) return;
+
     try {
-        const response = await gapi.client.drive.files.list({
-            q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
-            fields: 'files(name)',
-        });
-        const videos = response.result.files;
-        const target = document.getElementById(elementId);
-        
-        if (videos && videos.length > 0) {
-            target.innerHTML = videos.map(v => `• ${v.name}`).join('<br>');
+        const manager = window.clinicManager;
+        const videos = manager ? await manager.fetchVideosFromFolder(folderId) : [];
+        const n = videos ? videos.length : 0;
+
+        countEl.textContent = n === 1 ? '1 video' : `${n} videos`;
+        if (n > 0) {
+            listEl.innerHTML = videos.map(v => `• ${v.name}`).join('<br>');
         } else {
-            target.innerHTML = '<span class="fst-italic">No se encontraron videos.</span>';
+            listEl.innerHTML = '<span class="fst-italic">No se encontraron videos.</span>';
         }
+        if (typeof onDone === 'function') onDone(n);
     } catch (e) {
-        document.getElementById(elementId).innerText = "Error cargando videos.";
+        console.error("Error listando videos de carpeta:", e);
+        countEl.textContent = '0 videos';
+        listEl.innerHTML = '<span class="text-muted small">No se pudo cargar la lista.</span>';
+        if (typeof onDone === 'function') onDone(0);
     }
+}
+
+function togglePlaylistFolderList(folderId) {
+    const listEl = document.getElementById(`list-of-${folderId}`);
+    const btn = document.getElementById(`btn-toggle-${folderId}`);
+    if (!listEl || !btn) return;
+    const isHidden = listEl.style.display === 'none';
+    listEl.style.display = isHidden ? 'block' : 'none';
+    btn.textContent = isHidden ? '▲ Ocultar lista' : '▼ Ver lista';
 }
 
 function reproducirPlaylistActual() {

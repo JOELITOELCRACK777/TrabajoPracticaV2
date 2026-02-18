@@ -138,19 +138,30 @@ body, html {
     pointer-events: none;
 }
 
-/* --- SIDEBAR --- */
+/* --- SIDEBAR (oculto hasta que el usuario pulse "INICIAR TV") --- */
 .sidebar-right {
     background: linear-gradient(160deg, var(--clinic-blue-deep) 0%, var(--clinic-blue-mid) 100%);
     border-left: 1px solid rgba(255,255,255,0.15);
     box-shadow: -10px 0 40px rgba(0, 10, 30, 0.6);
     z-index: 10;
-    overflow: hidden; 
-    white-space: nowrap; 
-    width: var(--sidebar-width);
-    min-width: 300px;
+    overflow: hidden;
+    white-space: nowrap;
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    border-left: 0;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    transition: width 0.4s ease, opacity 0.4s ease, min-width 0.4s ease;
+}
+
+/* Solo cuando la TV está en marcha (INICIAR TV) se muestra y anima la barra del clima */
+body.tv-started .sidebar-right {
+    width: var(--sidebar-width);
+    min-width: 300px;
+    opacity: 1;
+    border-left: 1px solid rgba(255,255,255,0.1);
     animation: pushCycle 90s infinite ease-in-out;
 }
 
