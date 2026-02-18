@@ -172,6 +172,24 @@ body, html {
     justify-content: center;
 }
 
+/* Título de la clínica: centrado y destacado en la interfaz de reproducción */
+.brand-name-text {
+    text-align: center;
+    width: 100%;
+    padding: 0 var(--padding-std);
+    margin-bottom: 0.5rem;
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-white);
+    text-shadow: 0 0 20px rgba(13, 202, 240, 0.5);
+}
+
+.brand-name-text .text-info,
+.brand-name-text span {
+    color: #0dcaf0 !important;
+}
+
 .brand-section::before {
     content: '';
     position: absolute;
@@ -197,18 +215,17 @@ body, html {
 }
 
 .time-display {
-    margin-left: -12px;
     font-family: 'Montserrat', sans-serif;
-    font-size: 4rem;
+    font-size: 2.85rem;
     font-weight: 300;
     line-height: 1;
     color: var(--text-white);
     letter-spacing: -2px;
-    text-shadow: 0 0 30px rgba(13, 202, 240, 0.4); 
+    text-shadow: 0 0 30px rgba(13, 202, 240, 0.4);
 }
 
 .date-display {
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 3px;
@@ -258,7 +275,8 @@ body, html {
 
 @media (min-width: 2000px) {
     :root { --sidebar-width: 500px; }
-    .time-display { font-size: 7rem; }
+    .time-display { font-size: 4rem; }
+    .brand-name-text { font-size: 1.75rem; }
     #temperatura { font-size: 4rem; }
 }
 

@@ -335,8 +335,21 @@ class ClinicManager {
     async ensureValidToken() {
         return new Promise((resolve) => {
             const now = Date.now();
+            // Si no tenemos token en memoria (p. ej. al reabrir la app), intentar restaurar desde localStorage
+            if (!this.accessToken && typeof localStorage !== 'undefined') {
+                const saved = localStorage.getItem('google_access_token');
+                const exp = localStorage.getItem('google_token_expiration');
+                if (saved && exp && now < parseInt(exp, 10)) {
+                    this.accessToken = saved;
+                    this.tokenExpiration = parseInt(exp, 10);
+                }
+            }
             if (this.accessToken && now < this.tokenExpiration) {
                 resolve(this.accessToken);
+                return;
+            }
+            if (!this.tokenClient) {
+                resolve(this.accessToken || null);
                 return;
             }
             console.log("🔄 Renovando token...");
@@ -513,113 +526,137 @@ class ClinicManager {
 }
 
     // ==========================================
-    // 3. SUBIDA DE ARCHIVOS (CON BARRA DE PROGRESO)
+    // 3. SUBIDA DE ARCHIVOS (OPTIMIZADA: MULTIPART/RESUMIBLE + PARALELO)
     // ==========================================
-    //1
-    // Esta función reemplaza a handleFileUpload antigua
+    static get RESUMABLE_THRESHOLD() { return 5 * 1024 * 1024; }  // > 5 MB → resumible
+    static get MAX_PARALLEL_UPLOADS() { return 2; }
+
+    async _uploadOneFile(file, accessToken, targetFolderId, onProgress) {
+        const useResumable = file.size > ClinicManager.RESUMABLE_THRESHOLD;
+        if (!useResumable) return this._uploadMultipart(file, accessToken, targetFolderId, onProgress);
+        return this._uploadResumable(file, accessToken, targetFolderId, onProgress);
+    }
+
+    _uploadMultipart(file, accessToken, targetFolderId, onProgress) {
+        return new Promise((resolve, reject) => {
+            const metadata = { name: file.name, parents: [targetFolderId] };
+            const form = new FormData();
+            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            form.append('file', file);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name');
+            xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
+            xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || 'Error subida')));
+            xhr.onerror = () => reject(new Error("Error de red"));
+            xhr.send(form);
+        });
+    }
+
+    async _uploadResumable(file, accessToken, targetFolderId, onProgress) {
+        const metadata = { name: file.name, parents: [targetFolderId] };
+        const startRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(metadata)
+        });
+        if (!startRes.ok) throw new Error(await startRes.text());
+        const uploadUrl = startRes.headers.get('Location');
+        if (!uploadUrl) throw new Error('No se obtuvo URL de subida resumible');
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', uploadUrl);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
+            xhr.onload = () => (xhr.status === 200 || xhr.status === 201 ? resolve() : reject(new Error(xhr.responseText || 'Error subida resumible')));
+            xhr.onerror = () => reject(new Error("Error de red"));
+            xhr.send(file);
+        });
+    }
+
     async handleFileUpload(event) {
-    // 1. Obtener archivos (del input o del evento)
-    const files = (event.target && event.target.files) ? event.target.files : event;
-    if (!files || files.length === 0) return;
+        const files = (event.target && event.target.files) ? event.target.files : event;
+        if (!files || files.length === 0) return;
 
-    // Determinamos a qué carpeta subir: al bloque activo o a la carpeta principal
-    const targetFolderId = this.activeSubfolderId || this.currentFolderId;
+        const targetFolderId = this.activeSubfolderId || this.currentFolderId;
+        if (!targetFolderId) {
+            alert("⚠️ Error: No se detectó una carpeta de destino.");
+            return;
+        }
 
-    if (!targetFolderId) {
-        alert("⚠️ Error: No se detectó una carpeta de destino.");
-        return;
+        const accessToken = await this.ensureValidToken();
+        const container = document.getElementById('upload-progress-container');
+        const statusText = document.getElementById('upload-status');
+        const percentageText = document.getElementById('upload-percentage');
+        const progressBar = document.getElementById('upload-progress-bar');
+
+        const filesArray = Array.from(files);
+        const totalFiles = filesArray.length;
+        const totalBytes = filesArray.reduce((s, f) => s + f.size, 0);
+        const loadedByIndex = filesArray.map(() => 0);
+        let completedCount = 0;
+
+        const updateUI = () => {
+            const loaded = loadedByIndex.reduce((a, b) => a + b, 0);
+            const percent = totalBytes > 0 ? Math.round((loaded / totalBytes) * 100) : 0;
+            if (progressBar) progressBar.style.width = percent + '%';
+            if (percentageText) percentageText.innerText = percent + '%';
+            if (statusText) statusText.innerText = totalFiles === 1 ? `Subiendo: ${filesArray[0].name}` : `Subiendo ${completedCount}/${totalFiles} archivos — ${percent}%`;
+        };
+
+        if (container) { container.classList.remove('d-none'); container.classList.add('d-block'); }
+        updateUI();
+
+        const maxParallel = ClinicManager.MAX_PARALLEL_UPLOADS;
+        const queue = filesArray.map((file, index) => ({ file, index }));
+        let active = 0;
+
+        const runNext = () => {
+            while (queue.length > 0 && active < maxParallel) {
+                const { file, index } = queue.shift();
+                active++;
+                this._uploadOneFile(file, accessToken, targetFolderId, (loaded, total) => {
+                    loadedByIndex[index] = total ? loaded : 0;
+                    updateUI();
+                }).then(() => {
+                    loadedByIndex[index] = file.size;
+                    completedCount++;
+                    updateUI();
+                    console.log(`✅ Subido: ${file.name}`);
+                }).catch((err) => {
+                    console.error("Error upload:", err);
+                    alert(`❌ Falló la subida de: ${file.name}`);
+                }).finally(() => {
+                    active--;
+                    runNext();
+                });
+            }
+        };
+
+        runNext();
+
+        await new Promise((resolve) => {
+            const waitDone = () => {
+                if (active === 0 && queue.length === 0) return resolve();
+                setTimeout(waitDone, 120);
+            };
+            waitDone();
+        });
+
+        if (statusText) statusText.innerText = "✅ ¡Todo listo!";
+        if (progressBar) progressBar.style.width = '100%';
+        if (percentageText) percentageText.innerText = '100%';
+
+        if (this.currentFolderId) this.updateFolderStatsDeep(this.currentFolderId);
+
+        setTimeout(() => {
+            if (container) { container.classList.add('d-none'); container.classList.remove('d-block'); }
+            if (this.activeSubfolderId) this.renderSubfolderFiles(this.activeSubfolderId);
+            else this.renderFolderContents(this.currentFolderId);
+        }, 1500);
+
+        if (event.target && event.target.tagName === 'INPUT') event.target.value = '';
     }
-
-    // 2. Asegurar Token Válido
-    const accessToken = await this.ensureValidToken();
-
-    // 3. Referencias UI
-    const container = document.getElementById('upload-progress-container');
-    const statusText = document.getElementById('upload-status');
-    const percentageText = document.getElementById('upload-percentage');
-    const progressBar = document.getElementById('upload-progress-bar');
-
-    // Procesar cada archivo (uno por uno)
-    for (let file of files) {
-        // Mostrar UI - Usamos d-none/d-block con classList.remove/add para ser más seguros
-        if (container) {
-            container.classList.remove('d-none');
-            container.classList.add('d-block');
-        }
-        if (progressBar) progressBar.style.width = '0%';
-        if (statusText) statusText.innerText = `Subiendo: ${file.name}`;
-
-        try {
-            await new Promise((resolve, reject) => {
-                const metadata = { 
-                    'name': file.name, 
-                    'parents': [targetFolderId]
-                };
-                
-                const form = new FormData();
-                form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-                form.append('file', file);
-
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name');
-                xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
-
-                // Progreso
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        const percent = Math.round((e.loaded / e.total) * 100);
-                        if (progressBar) progressBar.style.width = percent + '%';
-                        if (percentageText) percentageText.innerText = percent + '%';
-                    }
-                };
-
-                // Éxito
-                xhr.onload = () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        resolve();
-                    } else {
-                        reject(new Error(xhr.responseText));
-                    }
-                };
-
-                // Error
-                xhr.onerror = () => reject(new Error("Error de red"));
-                xhr.send(form);
-            });
-
-            console.log(`✅ Subido: ${file.name}`);
-
-        } catch (error) {
-            console.error("Error upload:", error);
-            alert(`❌ Falló la subida de: ${file.name}`);
-        }
-    }
-
-    // 4. Finalizar y Refrescar
-    if (statusText) statusText.innerText = "✅ ¡Todo listo!";
-    
-    // IMPORTANTE: Actualizar estadísticas después de subir
-    if (this.currentFolderId) {
-        this.updateFolderStatsDeep(this.currentFolderId);
-    }
-
-    setTimeout(() => {
-        if (container) {
-            container.classList.add('d-none');
-            container.classList.remove('d-block');
-        }
-        
-        // Refrescamos la vista de la cuadrícula de videos
-        if (this.activeSubfolderId) {
-            this.renderSubfolderFiles(this.activeSubfolderId);
-        } else {
-            this.renderFolderContents(this.currentFolderId);
-        }
-    }, 1500);
-
-    // Limpiar input
-    if (event.target && event.target.tagName === 'INPUT') event.target.value = '';
-}
 
     // ==========================================
     // 4. DASHBOARD Y CARPETAS
@@ -890,6 +927,20 @@ class ClinicManager {
     // ==========================================
 
     async launchPlaylist() {
+        // Asegurar token válido antes de reproducir (crítico al reabrir la app con programación ya activa)
+        try {
+            await this.ensureValidToken();
+            if (this.accessToken) {
+                localStorage.setItem('google_access_token', this.accessToken);
+                localStorage.setItem('google_token_expiration', String(this.tokenExpiration));
+            } else {
+                return alert("⚠️ Debes iniciar sesión en Google para reproducir. Abre el menú de clínicas e inicia sesión.");
+            }
+        } catch (e) {
+            console.error("No se pudo obtener token para reproducir:", e);
+            return alert("⚠️ Debes iniciar sesión en Google para reproducir. Abre el menú de clínicas e inicia sesión.");
+        }
+
         let idsParaReproducir = [];
         let videosBAJA = [];
         let videosALTA = [];
@@ -1843,7 +1894,8 @@ class VideoPlayer {
         if (!response.ok) {
             console.error(`❌ Error en Drive: ${response.status}`);
             this.isLoading = false;
-            this.playNextCycle();
+            const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
+            setTimeout(next, 2000);
             return;
         }
 
@@ -1891,7 +1943,8 @@ class VideoPlayer {
     } catch (error) {
         console.error("❌ Error fatal cargando archivo:", error);
         this.isLoading = false;
-        setTimeout(() => this.playNextCycle(), 2000);
+        const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
+        setTimeout(next, 2000);
     }
 }
 }
