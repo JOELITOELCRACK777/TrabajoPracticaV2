@@ -326,7 +326,7 @@ class ClinicManager {
         if (savedToken && savedExpiration && now < parseInt(savedExpiration)) {
             this.accessToken = savedToken;
             this.tokenExpiration = parseInt(savedExpiration);
-            this.loadClinicsFromDrive(); 
+            this.loadClinicsFromDrive();
         } else {
             this.renderLoginScreen();
         }
@@ -426,29 +426,26 @@ class ClinicManager {
             // 3. Consultamos a Google Drive (Usando safeDriveFetch para seguridad)
             const q = `'${cleanId}' in parents and (mimeType contains 'video/' or mimeType contains 'image/') and trashed = false`;
             const fields = 'files(id, name, mimeType, thumbnailLink, webViewLink)';
-            // Eliminamos apiKey para usar solo Token Bearer (más seguro)
             const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(fields)}`;
             
-            const res = await this.safeDriveFetch(url); // USAMOS LA VERSIÓN SEGURA
+            const res = await this.safeDriveFetch(url);
             const data = await res.json();
 
-            grid.innerHTML = ''; // Limpiamos el spinner
+            grid.innerHTML = '';
 
-            // 4. Si no hay archivos
             if (!data.files || data.files.length === 0) {
                 grid.innerHTML = '<div class="col-12 text-center text-white-50 py-4">Esta carpeta está vacía 🤷‍♂️</div>';
                 return;
             }
 
-            // 5. Generamos las tarjetas
             data.files.forEach(file => {
                 const isVideo = file.mimeType.includes('video');
-                const badgeClass = isVideo ? 'badge-video' : 'badge-image'; // Asegúrate de tener CSS para esto
+                const badgeClass = isVideo ? 'badge-video' : 'badge-image';
                 const badgeText = isVideo ? 'VIDEO' : 'FOTO';
                 const thumbUrl = file.thumbnailLink || 'img/logoclinica.png'; 
 
                 const col = document.createElement('div');
-                col.className = 'col-6 col-md-4 col-lg-3 mb-3'; // Agregué mb-3 para espacio
+                col.className = 'col-6 col-md-4 col-lg-3 mb-3';
                 col.innerHTML = `
                     <div class="file-thumbnail-card h-100 position-relative bg-dark border border-secondary rounded overflow-hidden">
                         <span class="position-absolute top-0 start-0 badge bg-${isVideo ? 'danger' : 'primary'} m-2">${badgeText}</span>
@@ -477,15 +474,12 @@ class ClinicManager {
     }
 
     async deleteFile(fileId) { 
-    // 1. Confirmación de seguridad
     if(!confirm('¿Estás seguro de eliminar este archivo permanentemente?')) return;
     
-    // 2. Feedback visual en el botón (Si existe el evento global)
     const btn = (typeof event !== 'undefined' && event) ? event.currentTarget : null; 
     if (btn) { btn.disabled = true; btn.innerText = "..."; }
 
     try {
-        // 3. Petición a la API para mover a la papelera
         const res = await this.safeDriveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
             method: 'PATCH',
             body: JSON.stringify({ trashed: true })
@@ -688,18 +682,13 @@ class ClinicManager {
     listContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info small"></div></div>';
 
     try {
-        // 4. Petición a Drive: Buscamos todas las carpetas dentro de la clínica
         const q = `'${targetId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
         const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
-        
         const res = await this.safeDriveFetch(url); 
         const data = await res.json();
-        
-        // 5. Guardamos y renderizamos la lista completa
         this.allFolders = data.files || [];
         this.allFolders.sort((a, b) => a.name.localeCompare(b.name));
         this.renderFolderList(this.allFolders);
-        
     } catch (e) {
         console.error("Error en loadDashboard:", e);
         listContainer.innerHTML = '<div class="text-danger small text-center">Error al cargar carpetas.</div>';
@@ -750,24 +739,18 @@ class ClinicManager {
     btn.disabled = true;
 
     try {
-        // 3. Preparación de Metadatos
         const fileMetadata = {
             name: folderName,
             mimeType: 'application/vnd.google-apps.folder',
-            parents: [clinicId] // Se crea en la raíz de la clínica
+            parents: [clinicId]
         };
-
-        // 4. Petición de creación a Google Drive
         const res = await this.safeDriveFetch('https://www.googleapis.com/drive/v3/files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(fileMetadata)
         });
-
         if (res.ok) {
             console.log(`✅ Carpeta "${folderName}" creada con éxito.`);
-
-            // 5. RECARGA: Llamamos a loadDashboard para sincronizar la lista completa desde Drive
             await this.loadDashboard();
 
             // Limpiamos el input del ID (número) para la siguiente creación
@@ -927,7 +910,6 @@ class ClinicManager {
     // ==========================================
 
     async launchPlaylist() {
-        // Asegurar token válido antes de reproducir (crítico al reabrir la app con programación ya activa)
         try {
             await this.ensureValidToken();
             if (this.accessToken) {
@@ -1025,7 +1007,6 @@ class ClinicManager {
         if (this.player && this.player.startQueueWithIntensity) {
             this.player.startQueueWithIntensity(videosBAJA, videosALTA, videosMEDIA);
         } else if (this.player && this.player.startQueue) {
-            // Fallback: si el método nuevo no existe, usar el antiguo
             const allVideos = [...videosBAJA, ...videosALTA, ...videosMEDIA];
             allVideos.sort(() => Math.random() - 0.5);
             this.player.startQueue(allVideos);
@@ -1075,13 +1056,10 @@ class ClinicManager {
         let videosFound = [];
 
         try {
-            // 1. Buscar VIDEOS O CARPETAS (bloques) dentro de la carpeta principal
             const q = `'${cleanId}' in parents and (mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder') and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,description)`;
-            
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,description,size,videoMediaMetadata)`;
             const response = await this.safeDriveFetch(url);
             if (!response.ok) return [];
-            
             const data = await response.json();
             const files = data.files || [];
 
@@ -1134,7 +1112,7 @@ class ClinicManager {
     async fetchVideosFromBlock(blockId) {
         try {
             const q = `'${blockId}' in parents and mimeType contains 'video/' and trashed = false`;
-            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType)`;
+            const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,size,videoMediaMetadata)`;
             
             const response = await this.safeDriveFetch(url);
             if (!response.ok) return [];
@@ -1184,7 +1162,6 @@ class ClinicManager {
             this.renderFolderList();
             setTimeout(() => this.updateFloatingBar(), 150); 
         } else if (stepId === 'step-playlist') {
-            // Sincronizar selección: si currentPlaylistSelection está vacía pero el Map tiene datos, usar el Map
             const fromMap = this.playlistSelection && this.playlistSelection.size > 0
                 ? Array.from(this.playlistSelection.keys())
                 : [];
@@ -1286,7 +1263,11 @@ class ClinicManager {
         const container = document.getElementById('playlist-preview-list');
         if (!container) return;
         container.innerHTML = '';
-        if (this.playlistSelection.size === 0) return container.innerHTML = `<div class="text-center py-4 text-white-50 small">Vacío</div>`;
+        if (this.playlistSelection.size === 0) {
+            container.innerHTML = `<div class="text-center py-3 text-white-50 small">No hay carpetas</div>
+                <button type="button" class="btn btn-outline-info btn-sm w-100 mt-2" onclick="clinicManager.showStep('step-dashboard')">Ir a agregar</button>`;
+            return;
+        }
         
         this.playlistSelection.forEach((folder) => {
             const item = document.createElement('div');
@@ -1600,11 +1581,9 @@ class VideoPlayer {
     constructor() {
         this.videoElement = document.getElementById('main-video') || document.getElementById('main-player');
         
-        // Evitar que el video reproduzca o muestre nada hasta que el usuario pulse "INICIAR TV"
         if (this.videoElement) {
             this.videoElement.pause();
             this.videoElement.removeAttribute('src');
-            this.videoElement.load();
         }
 
         this.container = document.getElementById('video-container');
@@ -1650,43 +1629,26 @@ class VideoPlayer {
 
     // --- 1. FUNCIÓN DE ENTRADA CON INTENSIDADES ---
     startQueueWithIntensity(videosBAJA, videosALTA, videosMEDIA) {
-        // 1. Validaciones
         if ((!videosBAJA || videosBAJA.length === 0) && 
             (!videosALTA || videosALTA.length === 0) && 
             (!videosMEDIA || videosMEDIA.length === 0)) {
             return alert("Lista vacía");
         }
 
-        // 2. Detener reproducción anterior
         if (this.videoElement) {
             this.videoElement.pause();
             this.resetFlags();
         }
 
-        // 3. Cargar listas separadas por intensidad
         this.videosBAJA = videosBAJA || [];
         this.videosALTA = videosALTA || [];
         this.videosMEDIA = videosMEDIA || [];
-        
-        // Reiniciar índices
-        this.bajaIndex = 0;
-        this.altaIndex = 0;
-        this.mediaIndex = 0;
-        
-        // Inicializar tiempos
-        this.startTime = Date.now();
-        this.nextAltaTime = 5 * 60 * 1000; // Primera ALTA a los 5 minutos (300000 ms)
-        this.nextMediaTime = 10 * 60 * 1000; // Primera MEDIA a los 10 minutos (600000 ms)
+        this.orderedSequence = typeof buildOrderedSequence === 'function'
+            ? buildOrderedSequence(this.videosBAJA, this.videosALTA, this.videosMEDIA)
+            : [];
+        this.sequenceIndex = 0;
         this.intensityMode = true;
 
-        const total = this.videosBAJA.length + this.videosALTA.length + this.videosMEDIA.length;
-        console.log(`📺 Player iniciado con sistema de intensidades:`);
-        console.log(`   - BAJA: ${this.videosBAJA.length} videos (reproducción continua)`);
-        console.log(`   - ALTA: ${this.videosALTA.length} videos (cada 5 minutos)`);
-        console.log(`   - MEDIA: ${this.videosMEDIA.length} videos (cada 10 minutos)`);
-        console.log(`   - Total: ${total} videos`);
-
-        // 4. MANEJO DE INTERFAZ (solo al dar INICIAR TV: menú arriba, sidebar/clima visibles)
         document.body.classList.add('tv-started');
         if (this.menu) this.menu.classList.add('slide-up');
         if (this.container) {
@@ -1695,7 +1657,7 @@ class VideoPlayer {
         }
         if (this.weatherWidget) this.weatherWidget.style.display = 'block';
 
-        // 5. Arrancar con un video BAJA (reproducción continua)
+        console.log(`📺 Player iniciado: ${this.orderedSequence.length} ítems`);
         this.playNextWithIntensity();
     }
 
@@ -1745,8 +1707,11 @@ class VideoPlayer {
 
     onVideoEnded() {
         if (this.fadeStarted) return;
+        if (this.isLoading) return; // Ignorar 'ended' fantasma al cambiar src (evita doble siguiente y pantalla negra)
         this.fadeStarted = true;
-        
+
+        this.isLoading = false;
+
         console.log("🏁 Video terminado. Iniciando transición...");
 
         // Iniciar Fade de Audio
@@ -1793,58 +1758,26 @@ class VideoPlayer {
         }, 50);
     }
 
-    // --- 2. CICLO CON INTENSIDADES ---
+    // --- 2. CICLO POR ORDEN (misma secuencia que Visualizador; solo se repite al terminar la lista) ---
     async playNextWithIntensity() {
-        // Evitar doble carga simultánea
-        if (this.isLoading && this.currentObjectUrl) return; 
-        
+        if (this.isLoading && this.currentObjectUrl) return;
+
+        if (!this.orderedSequence || this.orderedSequence.length === 0) {
+            this.isLoading = false;
+            console.warn("⚠️ Secuencia vacía.");
+            return;
+        }
+
         this.isLoading = true;
         this.resetFlags();
 
-        const now = Date.now();
-        const elapsedMs = now - this.startTime;
-        const elapsedMinutes = elapsedMs / 1000 / 60;
-
-        // Determinar qué tipo de video reproducir según el tiempo transcurrido
-        let nextVideo = null;
-        let videoType = 'BAJA';
-
-        // Prioridad 1: MEDIA cada 10 minutos (10, 20, 30, etc.)
-        // Verificar si ya pasó el tiempo programado para MEDIA
-        if (this.videosMEDIA.length > 0 && elapsedMs >= this.nextMediaTime) {
-            nextVideo = this.videosMEDIA[this.mediaIndex % this.videosMEDIA.length];
-            this.mediaIndex++;
-            // Programar próxima MEDIA en 10 minutos más
-            this.nextMediaTime = elapsedMs + (10 * 60 * 1000);
-            videoType = 'MEDIA';
-            console.log(`🟡 Reproduciendo MEDIA (${Math.floor(elapsedMinutes)} min transcurridos)`);
-        }
-        // Prioridad 2: ALTA cada 5 minutos (5, 15, 25, etc.) pero NO en múltiplos de 10
-        // Verificar si ya pasó el tiempo programado para ALTA Y no coincide con MEDIA
-        else if (this.videosALTA.length > 0 && elapsedMs >= this.nextAltaTime && 
-                 Math.abs(elapsedMs - this.nextMediaTime) > 60 * 1000) { // Evitar conflicto con MEDIA (margen de 1 min)
-            nextVideo = this.videosALTA[this.altaIndex % this.videosALTA.length];
-            this.altaIndex++;
-            // Programar próxima ALTA en 5 minutos más
-            this.nextAltaTime = elapsedMs + (5 * 60 * 1000);
-            videoType = 'ALTA';
-            console.log(`🔴 Reproduciendo ALTA (${Math.floor(elapsedMinutes)} min transcurridos)`);
+        const item = this.orderedSequence[this.sequenceIndex];
+        this.sequenceIndex = (this.sequenceIndex + 1) % this.orderedSequence.length;
+        if (this.sequenceIndex === 0) {
+            console.log("🔄 Lista completada: se repite el orden del Visualizador.");
         }
 
-        // Si no toca ALTA ni MEDIA, reproducir BAJA (continuo y aleatorio)
-        if (!nextVideo) {
-            if (this.videosBAJA.length === 0) {
-                console.warn("⚠️ No hay videos BAJA disponibles.");
-                this.isLoading = false;
-                return;
-            }
-            // Aleatorizar el índice de BAJA para mayor variedad
-            const randomBajaIndex = Math.floor(Math.random() * this.videosBAJA.length);
-            nextVideo = this.videosBAJA[randomBajaIndex];
-            videoType = 'BAJA';
-        }
-
-        await this.playVideoFile(nextVideo, videoType);
+        await this.playVideoFile(item.video, item.intensity);
     }
 
     // --- 2. CICLO LEGACY (sin intensidades) ---
@@ -1876,78 +1809,204 @@ class VideoPlayer {
     // --- 3. CARGA (BLOB) ---
     async playVideoFile(video, intensity = null) {
     if (!this.videoElement) return;
+    if (!video || !video.id) {
+        console.warn("⚠️ Video sin id, saltando...", video);
+        this.isLoading = false;
+        const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
+        setTimeout(next, 500);
+        return;
+    }
 
     const intensityLabel = intensity ? ` [${intensity}]` : '';
-    console.log(`🎬 Intentando cargar: ${video.name}${intensityLabel}`);
+    const sizeMB = video.size != null ? (Number(video.size) / (1024 * 1024)).toFixed(2) : '?';
+    const durationSec = (video.videoMediaMetadata && video.videoMediaMetadata.durationMillis) ? (Number(video.videoMediaMetadata.durationMillis) / 1000).toFixed(1) : '?';
+    console.log(`🎬 Cargando: "${video.name || video.id}"${intensityLabel} | tamaño: ${sizeMB} MB | duración: ${durationSec} s`);
     this.isLoading = true;
 
-    try {
-        // 1. Obtener Token
-        let token = localStorage.getItem('google_access_token');
-        
-        // Parche rápido: Si no hay token en localStorage, intenta buscarlo en gapi si existe
-        if (!token && typeof gapi !== 'undefined' && gapi.client && gapi.client.getToken()) {
-             token = gapi.client.getToken().access_token;
-        }
+    // Limpiar estado del video anterior
+    this.videoElement.classList.remove('video-fade-out', 'video-visible');
+    this.videoElement.volume = 1;
+    // Modo por defecto hasta que tengamos dimensiones reales (evita dejar vertical del video anterior si el nuevo reporta 0x0)
+    if (this.playerSection) {
+        this.playerSection.classList.add('is-horizontal-mode');
+        this.playerSection.classList.remove('is-vertical-mode');
+    }
+    this.fadeStarted = false;
+    this.audioFadeStarted = false;
+    if (this.audioFadeInterval) {
+        clearInterval(this.audioFadeInterval);
+        this.audioFadeInterval = null;
+    }
 
+    try {
+        let token = null;
+        if (window.clinicManager && typeof window.clinicManager.ensureValidToken === 'function') {
+            await window.clinicManager.ensureValidToken();
+            token = window.clinicManager.accessToken || localStorage.getItem('google_access_token');
+            if (token && window.clinicManager.accessToken) {
+                localStorage.setItem('google_access_token', window.clinicManager.accessToken);
+                localStorage.setItem('google_token_expiration', String(window.clinicManager.tokenExpiration || 0));
+            }
+        }
+        if (!token) token = localStorage.getItem('google_access_token');
+        if (!token && typeof gapi !== 'undefined' && gapi.client && gapi.client.getToken()) {
+            token = gapi.client.getToken().access_token;
+        }
         if (!token) throw new Error("No hay token disponible");
 
-        // 2. Descarga del Blob
-        const response = await fetch(`https://www.googleapis.com/drive/v3/files/${video.id}?alt=media`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-
+        const url = `https://www.googleapis.com/drive/v3/files/${video.id}?alt=media`;
+        const doFetch = (t) => fetch(url, { headers: { 'Authorization': `Bearer ${t}` } });
+        let response = await doFetch(token);
+        if (response.status === 401 && window.clinicManager && typeof window.clinicManager.ensureValidToken === 'function') {
+            window.clinicManager.tokenExpiration = 0;
+            await window.clinicManager.ensureValidToken();
+            const newToken = window.clinicManager.accessToken || localStorage.getItem('google_access_token');
+            if (newToken) { response = await doFetch(newToken);
+                if (response.ok && window.clinicManager.accessToken) {
+                    localStorage.setItem('google_access_token', window.clinicManager.accessToken);
+                    localStorage.setItem('google_token_expiration', String(window.clinicManager.tokenExpiration || 0));
+                }
+            }
+        }
         if (!response.ok) {
-            console.error(`❌ Error en Drive: ${response.status}`);
             this.isLoading = false;
             const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
-            setTimeout(next, 2000);
+            if (response.status === 403 || response.status === 404) {
+                console.warn(`⏭ Saltando "${video.name || video.id}": Drive devolvió ${response.status}. Si en la carpeta dice "Procesando", espera a que termine o vuelve a subir el archivo.`);
+                setTimeout(next, 800);
+            } else {
+                console.error(`❌ Error en Drive: ${response.status}`);
+                setTimeout(next, 2000);
+            }
             return;
         }
-
         const blob = await response.blob();
-        
-        if (this.currentObjectUrl) URL.revokeObjectURL(this.currentObjectUrl);
-        this.currentObjectUrl = URL.createObjectURL(blob);
+        const newObjectUrl = URL.createObjectURL(blob);
+        const oldUrl = this.currentObjectUrl;
+        this.currentObjectUrl = newObjectUrl;
 
-        // 3. Preparar el elemento
-        this.videoElement.style.opacity = "0"; // Ocultar mientras se acomoda
-        this.videoElement.src = this.currentObjectUrl;
+        this.videoElement.classList.remove('video-fade-out');
+        this.videoElement.style.opacity = "0";
 
-        // --- NUEVO: DETECTOR DE ORIENTACIÓN ---
-        // Se ejecuta apenas el navegador sabe el ancho y alto del video
-        this.videoElement.onloadedmetadata = () => {
-            if (this.playerSection) {
-                // Si la altura es mayor que el ancho -> Es Vertical
-                if (this.videoElement.videoHeight > this.videoElement.videoWidth) {
-                    console.log("📱 Modo Vertical activado");
+        if (this._showVideoTimeout) {
+            clearTimeout(this._showVideoTimeout);
+            this._showVideoTimeout = null;
+        }
+
+        // Reset del elemento para que la siguiente carga dispare eventos correctamente (evita negro en 3.º, 5.º, etc.)
+        this.videoElement.pause();
+        this.videoElement.currentTime = 0;
+
+        let shown = false;
+        const showVideo = () => {
+            if (shown) return;
+            if (this.currentObjectUrl !== newObjectUrl) return;
+            shown = true;
+            if (this._showVideoTimeout) {
+                clearTimeout(this._showVideoTimeout);
+                this._showVideoTimeout = null;
+            }
+            if (oldUrl) URL.revokeObjectURL(oldUrl);
+            this.videoElement.classList.remove('video-fade-out');
+            this.videoElement.classList.add('video-visible');
+            this.videoElement.style.setProperty('opacity', '1', 'important');
+            this.isLoading = false;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if (this.currentObjectUrl !== newObjectUrl) return;
+                    this.videoElement.classList.add('video-visible');
+                    this.videoElement.style.setProperty('opacity', '1', 'important');
+                    void this.videoElement.offsetHeight;
+                });
+            });
+            // Forzar que el navegador pinte el frame (algunos codecs suenan pero no muestran imagen)
+            const forcePaint = () => {
+                if (this.currentObjectUrl !== newObjectUrl || !this.videoElement.src) return;
+                const v = this.videoElement;
+                v.classList.add('video-visible');
+                v.style.setProperty('opacity', '1', 'important');
+                v.style.removeProperty('visibility');
+                if (v.readyState >= 2) {
+                    const t = v.currentTime;
+                    v.currentTime = t + 0.001;
+                    v.currentTime = t;
+                }
+            };
+            if (typeof this.videoElement.requestVideoFrameCallback === 'function') {
+                this.videoElement.requestVideoFrameCallback(forcePaint);
+            }
+            setTimeout(forcePaint, 150);
+            setTimeout(forcePaint, 500);
+        };
+
+        // 4. Actualizar modo vertical/horizontal solo cuando haya dimensiones válidas (evita negro si el codec reporta 0x0 o tarde)
+        const applyOrientation = () => {
+            if (!this.playerSection || this.currentObjectUrl !== newObjectUrl) return;
+            const w = this.videoElement.videoWidth || 0;
+            const h = this.videoElement.videoHeight || 0;
+            if (w > 0 && h > 0) {
+                if (h > w) {
                     this.playerSection.classList.add('is-vertical-mode');
                     this.playerSection.classList.remove('is-horizontal-mode');
                 } else {
-                    console.log("💻 Modo Cine (Horizontal) activado");
                     this.playerSection.classList.add('is-horizontal-mode');
                     this.playerSection.classList.remove('is-vertical-mode');
                 }
             }
+            // Si w o h son 0, no tocamos el modo (dejamos el anterior o el que venga por defecto) para no romper el layout
         };
 
-        // 4. Reproducir cuando esté listo
+        this.videoElement.onloadedmetadata = () => {
+            showVideo();
+            applyOrientation();
+        };
+
         this.videoElement.onloadeddata = () => {
+            applyOrientation();
             this.videoElement.play().then(() => {
-                this.videoElement.style.opacity = "1"; // Mostrar
-                this.isLoading = false;
+                showVideo();
+                applyOrientation();
                 console.log("✅ Reproduciendo ahora.");
             }).catch(err => {
                 console.warn("Autoplay bloqueado, intentando sin audio...", err);
                 this.videoElement.muted = true;
                 this.videoElement.play();
-                this.videoElement.style.opacity = "1";
-                this.isLoading = false;
+                showVideo();
+                applyOrientation();
             });
         };
 
+        this.videoElement.addEventListener('playing', () => {
+            const w = this.videoElement.videoWidth || 0;
+            const h = this.videoElement.videoHeight || 0;
+            if (w === 0 || h === 0) {
+                console.warn(`⚠️ "${video.name || video.id}" está en reproducción pero el navegador reporta dimensiones 0×0. Es probable que el CODEC de vídeo no sea compatible (solo se decodifica el audio). Prueba abrir el mismo archivo en VLC o en la vista previa de Drive: si ahí también se ve negro, el archivo tiene el vídeo dañado o en un codec no soportado.`);
+            } else {
+                console.log(`✅ Reproduciendo: ${w}×${h}`);
+            }
+            applyOrientation();
+            showVideo();
+        }, { once: true });
+        this.videoElement.addEventListener('canplay', () => { showVideo(); }, { once: true });
+        this.videoElement.addEventListener('canplaythrough', () => { showVideo(); }, { once: true });
+        this.videoElement.addEventListener('timeupdate', () => { showVideo(); }, { once: true });
+
+        // 5. Asignar nuevo src (después del reset para que el elemento emita eventos de carga)
+        this.videoElement.src = this.currentObjectUrl;
+        this.videoElement.load();
+
+        // Red de seguridad: si en 2.5 s no se disparó ningún evento, forzar visibilidad
+        this._showVideoTimeout = setTimeout(() => {
+            this._showVideoTimeout = null;
+            showVideo();
+        }, 2500);
+
     } catch (error) {
         console.error("❌ Error fatal cargando archivo:", error);
+        if (this._showVideoTimeout) {
+            clearTimeout(this._showVideoTimeout);
+            this._showVideoTimeout = null;
+        }
         this.isLoading = false;
         const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
         setTimeout(next, 2000);
@@ -1959,8 +2018,8 @@ function updateClock() {
     const now = new Date();
     const timeEl = document.getElementById('hora');
     const dateEl = document.getElementById('fecha');
-    if(timeEl) timeEl.innerText = now.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-    if(dateEl) dateEl.innerText = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '').toUpperCase();
+    if (timeEl) timeEl.innerText = now.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+    if (dateEl) dateEl.innerText = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '').toUpperCase();
 }
 
 async function updateWeather() {
@@ -1969,7 +2028,7 @@ async function updateWeather() {
         const data = await response.json();
         if (data.current_weather) {
             const tempEl = document.getElementById('temperatura');
-            if(tempEl) tempEl.innerText = `${Math.round(data.current_weather.temperature)}°C`;
+            if (tempEl) tempEl.innerText = `${Math.round(data.current_weather.temperature)}°C`;
         }
     } catch (e) { console.error("Clima off"); }
 }
@@ -2222,7 +2281,10 @@ function prepararYMostrarPlaylist() {
 function abrirProgramadorPlaylist() {
     const previewContainer = document.getElementById('playlist-preview-list');
     const badge = document.getElementById('selected-count-badge');
-    if (previewContainer) previewContainer.innerHTML = '<div class="text-center py-4 text-white-50 small">Vacío</div>';
+    if (previewContainer) {
+        previewContainer.innerHTML = `<div class="text-center py-3 text-white-50 small">No hay carpetas</div>
+            <button type="button" class="btn btn-outline-info btn-sm w-100 mt-2" onclick="clinicManager.showStep('step-dashboard')">Ir a agregar</button>`;
+    }
     if (badge) badge.innerText = '0 carpetas';
     if (window.clinicManager) {
         window.clinicManager.showStep('step-playlist');
