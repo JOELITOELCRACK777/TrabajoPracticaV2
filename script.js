@@ -455,7 +455,7 @@ class ClinicManager {
                                 onclick="clinicManager.deleteFile('${file.id}', '${cleanId}', '${folderName}')" 
                                 title="Eliminar archivo">✕</button>
                         
-                        <a href="${file.webViewLink}" target="_blank" class="d-block ratio ratio-16x9">
+                        <a href="${file.webViewLink || 'https://drive.google.com/file/d/' + file.id + '/view'}" target="_blank" class="d-block ratio ratio-16x9">
                             <img src="${thumbUrl}" class="w-100 h-100 object-fit-cover" alt="${file.name}" referrerpolicy="no-referrer">
                         </a>
                         
@@ -525,6 +525,15 @@ class ClinicManager {
     static get RESUMABLE_THRESHOLD() { return 5 * 1024 * 1024; }  // > 5 MB → resumible
     static get MAX_PARALLEL_UPLOADS() { return 2; }
 
+    /** MIME type correcto para que Drive procese el vídeo (evita "Procesando" infinito por tipo genérico) */
+    _getMimeForFile(file) {
+        const t = (file.type || '').toLowerCase();
+        if (t.startsWith('video/')) return file.type;
+        const ext = (file.name || '').split('.').pop().toLowerCase();
+        const map = { mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska' };
+        return map[ext] || 'video/mp4';
+    }
+
     async _uploadOneFile(file, accessToken, targetFolderId, onProgress) {
         const useResumable = file.size > ClinicManager.RESUMABLE_THRESHOLD;
         if (!useResumable) return this._uploadMultipart(file, accessToken, targetFolderId, onProgress);
@@ -533,10 +542,12 @@ class ClinicManager {
 
     _uploadMultipart(file, accessToken, targetFolderId, onProgress) {
         return new Promise((resolve, reject) => {
-            const metadata = { name: file.name, parents: [targetFolderId] };
+            const mimeType = this._getMimeForFile(file);
+            const metadata = { name: file.name, parents: [targetFolderId], mimeType };
             const form = new FormData();
             form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-            form.append('file', file);
+            const fileToSend = file.type && file.type.startsWith('video/') ? file : new File([file], file.name, { type: mimeType });
+            form.append('file', fileToSend);
             const xhr = new XMLHttpRequest();
             xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name');
             xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
@@ -548,7 +559,8 @@ class ClinicManager {
     }
 
     async _uploadResumable(file, accessToken, targetFolderId, onProgress) {
-        const metadata = { name: file.name, parents: [targetFolderId] };
+        const mimeType = this._getMimeForFile(file);
+        const metadata = { name: file.name, parents: [targetFolderId], mimeType };
         const startRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
@@ -560,7 +572,7 @@ class ClinicManager {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('PUT', uploadUrl);
-            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.setRequestHeader('Content-Type', mimeType);
             xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
             xhr.onload = () => (xhr.status === 200 || xhr.status === 201 ? resolve() : reject(new Error(xhr.responseText || 'Error subida resumible')));
             xhr.onerror = () => reject(new Error("Error de red"));
@@ -1374,12 +1386,13 @@ async renderSubfolderFiles(folderId) {
                 ? `<img src="${file.thumbnailLink.replace('=s220', '=s400')}" 
                          class="thumb-img" 
                          alt="${file.name}">`
-                : `<div class="thumb-img processing-thumb">
-                        <span class="processing-label">Procesando…</span>
+                : `<div class="thumb-img processing-thumb" title="En Drive sigue procesándose (vista previa), pero ya se puede reproducir en la playlist.">
+                        <span class="processing-label">Procesando, listo para reproducir</span>
                    </div>`;
 
+            const fileViewUrl = file.webViewLink || ('https://drive.google.com/file/d/' + file.id + '/view');
             col.innerHTML = `
-        <div class="file-thumbnail-card h-100" style="cursor: pointer;" onclick="window.open('${file.webViewLink}', '_blank')">
+        <div class="file-thumbnail-card h-100" style="cursor: pointer;" onclick="window.open('${fileViewUrl}', '_blank')">
             <span class="file-type-badge ${isVideo ? 'badge-video' : 'badge-image'}">
                 ${isVideo ? 'VIDEO' : 'FOTO'}
             </span>
@@ -2303,19 +2316,30 @@ const DEFAULT_VIDEO_DURATION_SEC = 120;
 
 /**
  * Construye el orden de reproducción según reglas de intensidad:
- * BAJA continua; ALTA cada 5 min; MEDIA cada 10 min.
- * Usa duración por video (o default) para calcular cuándo insertar ALTA/MEDIA.
+ * - Solo el tiempo de los videos BAJA (comunes) cuenta para los intervalos.
+ * - Cada 5 min de tiempo de BAJA → se inserta un video ALTA (su duración no cuenta).
+ * - Cada 8 min de tiempo de BAJA → se inserta un video MEDIA (su duración no cuenta).
+ * - Si se acaban los BAJA pero aún hay ALTA/MEDIA por insertar, se recicla la lista BAJA desde el inicio
+ *   para seguir "llenando" tiempo (tanque que se llena con BAJA y se drena con ALTA/MEDIA).
  * @returns {Array<{video: object, intensity: string}>}
  */
 function buildOrderedSequence(shuffledBaja, shuffledAlta, shuffledMedia) {
-    const baja = (shuffledBaja || []).map(v => ({ ...v, _dur: v.durationSec != null ? v.durationSec : DEFAULT_VIDEO_DURATION_SEC }));
-    const alta = (shuffledAlta || []).map(v => ({ ...v, _dur: v.durationSec != null ? v.durationSec : DEFAULT_VIDEO_DURATION_SEC }));
-    const media = (shuffledMedia || []).map(v => ({ ...v, _dur: v.durationSec != null ? v.durationSec : DEFAULT_VIDEO_DURATION_SEC }));
+    const getDurSec = (v) => {
+        if (v.durationSec != null && typeof v.durationSec === 'number') return v.durationSec;
+        const millis = v.videoMediaMetadata && v.videoMediaMetadata.durationMillis;
+        if (millis != null) return Number(millis) / 1000;
+        return DEFAULT_VIDEO_DURATION_SEC;
+    };
+    const baja = (shuffledBaja || []).map(v => ({ ...v, _dur: getDurSec(v) }));
+    const alta = (shuffledAlta || []).map(v => ({ ...v, _dur: getDurSec(v) }));
+    const media = (shuffledMedia || []).map(v => ({ ...v, _dur: getDurSec(v) }));
 
     const sequence = [];
-    let timeSec = 0;
-    let nextAltaSec = 5 * 60;
-    let nextMediaSec = 10 * 60;
+    let timeSec = 0; // Solo aumenta con videos BAJA
+    const ALTA_INTERVAL_SEC = 5 * 60;
+    const MEDIA_INTERVAL_SEC = 8 * 60;
+    let nextAltaSec = ALTA_INTERVAL_SEC;
+    let nextMediaSec = MEDIA_INTERVAL_SEC;
     let bi = 0, ai = 0, mi = 0;
     const maxItems = 2000;
 
@@ -2323,21 +2347,23 @@ function buildOrderedSequence(shuffledBaja, shuffledAlta, shuffledMedia) {
         let chosen = null;
         let intensity = 'BAJA';
 
-        if (mi < media.length && timeSec >= nextMediaSec) {
-            chosen = media[mi++];
-            intensity = 'MEDIA';
-            timeSec += chosen._dur;
-            nextMediaSec += 10 * 60;
-        } else if (ai < alta.length && timeSec >= nextAltaSec) {
+        if (ai < alta.length && timeSec >= nextAltaSec) {
             chosen = alta[ai++];
             intensity = 'ALTA';
-            timeSec += chosen._dur;
-            nextAltaSec += 5 * 60;
-        } else if (bi < baja.length) {
+            nextAltaSec += ALTA_INTERVAL_SEC;
+            // NO sumar chosen._dur a timeSec: el tiempo de ALTA no cuenta
+        } else if (mi < media.length && timeSec >= nextMediaSec) {
+            chosen = media[mi++];
+            intensity = 'MEDIA';
+            nextMediaSec += MEDIA_INTERVAL_SEC;
+            // NO sumar chosen._dur a timeSec: el tiempo de MEDIA no cuenta
+        } else if (baja.length > 0) {
             chosen = baja[bi++];
             intensity = 'BAJA';
             timeSec += chosen._dur;
+            if (bi >= baja.length) bi = 0; // Reciclar: volver a usar BAJA desde el inicio para seguir llenando tiempo
         } else if (ai < alta.length || mi < media.length) {
+            // Sin videos BAJA y aún hay ALTA/MEDIA: avanzar reloj e insertar el siguiente (caso borde)
             timeSec = Math.min(
                 ai < alta.length ? nextAltaSec : Infinity,
                 mi < media.length ? nextMediaSec : Infinity
@@ -2429,7 +2455,7 @@ function renderVisualizarPlaylist() {
             <h5 class="text-white mb-1">${active.name || 'Playlist'}</h5>
             <p class="text-white-50 small mb-0">${vigencia}</p>
         </div>
-        <h6 class="text-white-50 mb-2">Orden de reproducción (según duración e intensidad: ALTA cada 5 min, MEDIA cada 10 min)</h6>
+        <h6 class="text-white-50 mb-2">Orden de reproducción (según duración e intensidad: ALTA cada 5 min, MEDIA cada 8 min)</h6>
         <div class="bg-dark rounded border border-secondary p-2" style="max-height: 400px; overflow-y: auto;">
             ${listHtml || '<p class="text-muted small">Sin ítems.</p>'}
         </div>
