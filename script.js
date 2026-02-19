@@ -4,16 +4,25 @@ const CONFIG = {
     masterFolderId: '1p1kQo3-Yu4NuII1DDCZlN2HGEy_VUaxH' 
 };
 
+/** Clave de localStorage para la programación activa de una clínica (cada clínica guarda la suya). */
+function getActiveScheduleKey(clinicId) {
+    return clinicId ? 'activeScheduleData_' + clinicId : null;
+}
 
 class ScheduleManager {
     constructor() {
-        // 1. Cargar datos guardados o iniciar vacío
-        this.playlists = JSON.parse(localStorage.getItem('clinic_playlists')) || [];
-        this.currentPlaylistId = null; // Para saber qué está sonando ahora
+        this.currentClinicId = null; // Clínica actual: las playlists se guardan por clínica
+        this.playlists = []; // Se cargan en setClinicId(clinicId)
+        this.currentPlaylistId = null;
 
-        // 2. Iniciar el "reloj" que revisa la agenda cada 60 segundos
-        // Así, si cambia el día a medianoche, la playlist se actualiza sola.
         setInterval(() => this.checkSchedule(), 60000);
+    }
+
+    /** Cambiar de clínica: carga las playlists guardadas solo de esa clínica. */
+    setClinicId(clinicId) {
+        if (!clinicId) return;
+        this.currentClinicId = clinicId;
+        this.playlists = JSON.parse(localStorage.getItem('clinic_playlists_' + clinicId)) || [];
     }
 
     /**
@@ -38,7 +47,11 @@ class ScheduleManager {
             createdAt: new Date().toISOString()
         };
 
-        // Guardamos en la lista y en memoria del navegador
+        this.currentClinicId = this.currentClinicId || (window.clinicManager && window.clinicManager.selectedFolderId);
+        if (!this.currentClinicId) {
+            alert("⚠️ No se detectó la clínica actual. Selecciona una clínica primero.");
+            return false;
+        }
         this.playlists.push(newPlaylist);
         this.persist();
 
@@ -56,16 +69,17 @@ class ScheduleManager {
      * Si la playlist borrada era la que estaba activa, se limpia la programación activa.
      */
     deletePlaylist(id) {
-        const wasActive = (() => {
+        const key = getActiveScheduleKey(this.currentClinicId);
+        const wasActive = key ? (() => {
             try {
-                const raw = localStorage.getItem('activeScheduleData');
+                const raw = localStorage.getItem(key);
                 return raw && JSON.parse(raw).id === id;
             } catch (e) { return false; }
-        })();
+        })() : false;
         this.playlists = this.playlists.filter(p => p.id !== id);
         this.persist();
-        if (wasActive) {
-            localStorage.removeItem('activeScheduleData');
+        if (wasActive && key) {
+            localStorage.removeItem(key);
             window.currentPlaylistSelection = [];
             const scheduleList = document.getElementById('schedule-list');
             if (scheduleList) {
@@ -112,11 +126,10 @@ class ScheduleManager {
         alert(`📂 Playlist "${playlist.name}" cargada en el editor.`);
     }
 
-    /**
-     * Guardar en LocalStorage (para que no se borre al cerrar la ventana)
-     */
+    /** Guardar en LocalStorage: una clave por clínica (clinic_playlists_${clinicId}) */
     persist() {
-        localStorage.setItem('clinic_playlists', JSON.stringify(this.playlists));
+        if (!this.currentClinicId) return;
+        localStorage.setItem('clinic_playlists_' + this.currentClinicId, JSON.stringify(this.playlists));
     }
 
     /**
@@ -124,8 +137,10 @@ class ScheduleManager {
      * La reproducción solo se inicia cuando el usuario presiona "INICIAR TV"
      */
     checkSchedule() {
-        // Obtenemos la fecha de hoy en formato YYYY-MM-DD (igual que los inputs HTML)
-        const today = new Date().toISOString().split('T')[0];
+        // Fecha de hoy en hora LOCAL (YYYY-MM-DD), no UTC, para coincidir con el calendario
+        const now = new Date();
+        const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0'), d = String(now.getDate()).padStart(2, '0');
+        const today = `${y}-${m}-${d}`;
 
         // Buscamos si hay alguna playlist activa para hoy
         // Lógica: Hoy debe ser mayor/igual al Inicio Y menor/igual al Fin
@@ -148,13 +163,15 @@ class ScheduleManager {
                 // Actualizamos la selección global para que "INICIAR TV" la use
                 window.currentPlaylistSelection = activePlaylist.folders;
 
-                // Actualizamos la UI de programación activa si estamos en la pantalla de playlist
-                const activeScheduleData = localStorage.getItem('activeScheduleData');
-                if (!activeScheduleData || JSON.parse(activeScheduleData).id !== activePlaylist.id) {
-                    // Solo actualizamos si no está ya cargada o es diferente
-                    localStorage.setItem('activeScheduleData', JSON.stringify(activePlaylist));
-                    if (typeof cargarProgramacionVisual === 'function') {
-                        cargarProgramacionVisual(activePlaylist);
+                const key = getActiveScheduleKey(this.currentClinicId);
+                if (key) {
+                    const raw = localStorage.getItem(key);
+                    if (!raw || JSON.parse(raw).id !== activePlaylist.id) {
+                        const dataToSave = { ...activePlaylist, clinicId: this.currentClinicId || null };
+                        localStorage.setItem(key, JSON.stringify(dataToSave));
+                        if (typeof cargarProgramacionVisual === 'function') {
+                            cargarProgramacionVisual(dataToSave);
+                        }
                     }
                 }
                 
@@ -167,9 +184,8 @@ class ScheduleManager {
                 console.log("📅 Sin programación específica para hoy.");
                 
                 this.currentPlaylistId = 'DEFAULT';
-                
-                // Limpiamos la programación activa si no hay nada programado
-                localStorage.removeItem('activeScheduleData');
+                const key = getActiveScheduleKey(this.currentClinicId);
+                if (key) localStorage.removeItem(key);
                 const scheduleList = document.getElementById('schedule-list');
                 if (scheduleList) {
                     scheduleList.innerHTML = '<div class="text-center text-muted py-4 small">No hay programación definida.</div>';
@@ -230,20 +246,25 @@ document.addEventListener('DOMContentLoaded', () => {
     updateWeather(); 
     setInterval(updateWeather, 1800000);
 
-    // 5. Renderizar playlists guardadas
+    // 5. Playlists por clínica: cargar las de la clínica actual (si hay una guardada)
+    if (window.scheduleManager && window.clinicManager && window.clinicManager.selectedFolderId) {
+        window.scheduleManager.setClinicId(window.clinicManager.selectedFolderId);
+    }
     renderSavedPlaylists();
-    
-    // 6. Restaurar programación activa si existe
-    const savedData = localStorage.getItem('activeScheduleData');
-    if (savedData) {
-        try {
-            const playlist = JSON.parse(savedData);
-            console.log("🔄 Restaurando programación activa:", playlist.name);
-            setTimeout(() => {
-                cargarProgramacionVisual(playlist);
-            }, 1000); 
-        } catch (e) {
-            console.error("Error recuperando programación", e);
+
+    // 6. Restaurar programación activa de la clínica actual (guardada por clínica)
+    const currentClinicId = window.clinicManager && window.clinicManager.selectedFolderId;
+    const activeKey = currentClinicId ? getActiveScheduleKey(currentClinicId) : null;
+    if (activeKey) {
+        const savedData = localStorage.getItem(activeKey);
+        if (savedData) {
+            try {
+                const data = JSON.parse(savedData);
+                console.log("🔄 Restaurando programación activa:", data.name);
+                setTimeout(() => cargarProgramacionVisual(data), 1000);
+            } catch (e) {
+                console.error("Error recuperando programación", e);
+            }
         }
     }
     
@@ -941,8 +962,9 @@ class ClinicManager {
         let videosMEDIA = [];
         let usarMixGuardado = false;
 
-        // Prioridad 1: Programación activa con mix ya aleatorizado
-        const activeScheduleData = localStorage.getItem('activeScheduleData');
+        // Prioridad 1: Programación activa de esta clínica (guardada por clínica)
+        const activeKey = getActiveScheduleKey(this.selectedFolderId);
+        const activeScheduleData = activeKey ? localStorage.getItem(activeKey) : null;
         if (activeScheduleData) {
             try {
                 const active = JSON.parse(activeScheduleData);
@@ -1148,6 +1170,36 @@ class ClinicManager {
         localStorage.setItem('savedClinicId', this.selectedFolderId);
         this.playlistSelection.clear();
         this.updateFloatingBar();
+
+        // Playlists y programación activa son por clínica: cargar las de esta clínica y restaurar su estado
+        if (window.scheduleManager) {
+            window.scheduleManager.setClinicId(this.selectedFolderId);
+        }
+        const key = getActiveScheduleKey(this.selectedFolderId);
+        const scheduleList = document.getElementById('schedule-list');
+        if (key) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+                try {
+                    const data = JSON.parse(raw);
+                    window.currentPlaylistSelection = data.folders || [];
+                    if (typeof cargarProgramacionVisual === 'function') {
+                        cargarProgramacionVisual(data);
+                    }
+                } catch (e) {
+                    window.currentPlaylistSelection = [];
+                    if (scheduleList) scheduleList.innerHTML = '<div class="text-center text-muted py-4 small">No hay programación definida.</div>';
+                }
+            } else {
+                window.currentPlaylistSelection = [];
+                if (scheduleList) scheduleList.innerHTML = '<div class="text-center text-muted py-4 small">No hay programación definida.</div>';
+            }
+        } else {
+            window.currentPlaylistSelection = [];
+            if (scheduleList) scheduleList.innerHTML = '<div class="text-center text-muted py-4 small">No hay programación definida.</div>';
+        }
+        renderSavedPlaylists();
+
         if (this.clinicTitle) this.clinicTitle.innerText = name;
         this.showStep('step-decision');
     }
@@ -2038,15 +2090,41 @@ function updateClock() {
     if (dateEl) dateEl.innerText = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '').toUpperCase();
 }
 
+/** Mapeo de weathercode (Open-Meteo) a emoji para el icono del clima */
+function weatherCodeToIcon(code) {
+    if (code == null) return '☀️';
+    if (code === 0) return '☀️';
+    if (code >= 1 && code <= 3) return '⛅';
+    if (code >= 45 && code <= 48) return '🌫️';
+    if (code >= 51 && code <= 67) return '🌧️';
+    if (code >= 71 && code <= 77) return '🌨️';
+    if (code >= 80 && code <= 82) return '🌦️';
+    if (code >= 85 && code <= 86) return '🌨️';
+    if (code >= 95 && code <= 99) return '⛈️';
+    return '☀️';
+}
+
 async function updateWeather() {
+    const tempEl = document.getElementById('temperatura');
+    const iconEl = document.getElementById('clima-icon');
     try {
-        const response = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-18.47&longitude=-70.30&current_weather=true');
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=-18.47&longitude=-70.30&current_weather=true';
+        const response = await fetch(url, { method: 'GET', mode: 'cors' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         if (data.current_weather) {
-            const tempEl = document.getElementById('temperatura');
             if (tempEl) tempEl.innerText = `${Math.round(data.current_weather.temperature)}°C`;
+            if (iconEl) iconEl.innerText = weatherCodeToIcon(data.current_weather.weathercode);
+        } else {
+            if (tempEl) tempEl.innerText = '--°C';
         }
-    } catch (e) { console.error("Clima off"); }
+    } catch (e) {
+        console.warn('Clima no disponible:', e.message || e);
+        if (tempEl) tempEl.innerText = '--°C';
+        if (iconEl) iconEl.innerText = '☀️';
+    }
 }
 
 // NOTA: La inicialización de ClinicManager se hace en el DOMContentLoaded principal (línea 167)
@@ -2076,7 +2154,7 @@ function updateBottomBar() {
     const counterText = document.getElementById('selection-counter');
 
     if (counterText) counterText.innerText = count;
-
+    if (!bar) return;
     if (count > 0) {
         bar.classList.remove('d-none');
         bar.classList.add('d-block');
@@ -2310,6 +2388,8 @@ function abrirProgramadorPlaylist() {
         manager.updateFloatingBar();
         manager.showPlaylistReview();
         manager.showStep('step-playlist');
+        // Ocultar la barra celeste una vez dentro del programador (ya estamos en step-playlist)
+        setTimeout(() => manager.updateFloatingBar(), 50);
     } else {
         const previewContainer = document.getElementById('playlist-preview-list');
         const badge = document.getElementById('selected-count-badge');
@@ -2431,7 +2511,9 @@ function renderVisualizarPlaylist() {
     const container = document.getElementById('visualizar-content');
     if (!container) return;
 
-    const raw = localStorage.getItem('activeScheduleData');
+    const clinicId = window.clinicManager && window.clinicManager.selectedFolderId;
+    const activeKey = getActiveScheduleKey(clinicId);
+    const raw = activeKey ? localStorage.getItem(activeKey) : null;
     if (!raw) {
         container.innerHTML = `
             <div class="alert alert-warning bg-dark border-warning text-start">
@@ -2597,9 +2679,10 @@ function reproducirPlaylistActual() {
 function desactivarProgramacion() {
     if(!confirm("¿Deseas quitar la programación activa?")) return;
 
-    // 1. Borrar de la memoria
-    localStorage.removeItem('activeScheduleData');
-    window.currentPlaylistSelection = []; // Limpiar variable del TV
+    const clinicId = window.clinicManager && window.clinicManager.selectedFolderId;
+    const activeKey = getActiveScheduleKey(clinicId);
+    if (activeKey) localStorage.removeItem(activeKey);
+    window.currentPlaylistSelection = [];
 
     // 2. Limpiar UI (volver al mensaje "No hay programación")
     const activeContainer = document.getElementById('schedule-list');
@@ -2728,7 +2811,7 @@ async function activarPlaylist(id, event) {
             return;
         }
 
-        // 4. Guardar programación activa con el mix ya aleatorizado (para su duración)
+        // 4. Guardar programación activa de esta clínica (cada clínica guarda la suya)
         const activeData = {
             id: playlist.id,
             name: playlist.name,
@@ -2738,9 +2821,11 @@ async function activarPlaylist(id, event) {
             shuffledBaja: mix.shuffledBaja,
             shuffledAlta: mix.shuffledAlta,
             shuffledMedia: mix.shuffledMedia,
-            activatedAt: Date.now()
+            activatedAt: Date.now(),
+            clinicId: manager.selectedFolderId || null
         };
-        localStorage.setItem('activeScheduleData', JSON.stringify(activeData));
+        const activeKey = getActiveScheduleKey(manager.selectedFolderId);
+        if (activeKey) localStorage.setItem(activeKey, JSON.stringify(activeData));
         window.currentPlaylistSelection = playlist.folders;
 
         // 5. Reemplazar por la barra verde "Listo para reproducir" con vigencia
