@@ -1258,9 +1258,12 @@ class ClinicManager {
     }
 
     updateFloatingBar() {
+        const count = this.playlistSelection ? this.playlistSelection.size : 0;
+        const countEl = document.getElementById('selection-count');
+        if (countEl) countEl.innerText = count;
+        const badgeEl = document.getElementById('selected-count-badge');
+        if (badgeEl) badgeEl.innerText = count === 1 ? '1 carpeta' : `${count} carpetas`;
         if (!this.selectionBar) return;
-        const count = this.playlistSelection.size;
-        document.getElementById('selection-count').innerText = count;
         const isPlaylistActive = !document.getElementById('step-playlist')?.classList.contains('d-none');
         if (count > 0 && !isPlaylistActive) {
             this.selectionBar.style.display = "flex";
@@ -2289,19 +2292,32 @@ function prepararYMostrarPlaylist() {
 }
 
 /**
- * Abrir el programador de playlist (desde la barra flotante u otro lugar).
+ * Abrir el programador de playlist (desde el botón "Ir a Programación" arriba).
+ * Sincroniza la selección desde los checkboxes marcados para que el bloque y la lista muestren lo elegido.
  */
 function abrirProgramadorPlaylist() {
-    const previewContainer = document.getElementById('playlist-preview-list');
-    const badge = document.getElementById('selected-count-badge');
-    if (previewContainer) {
-        previewContainer.innerHTML = `<div class="text-center py-3 text-white-50 small">No hay carpetas</div>
-            <button type="button" class="btn btn-outline-info btn-sm w-100 mt-2" onclick="clinicManager.showStep('step-dashboard')">Ir a agregar</button>`;
+    const manager = window.clinicManager;
+    // Sincronizar desde checkboxes al Map de selección (por si solo se marcó checkbox y no la barra)
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    if (manager && checkboxes.length > 0) {
+        checkboxes.forEach(cb => {
+            const id = cb.value;
+            const name = cb.getAttribute('data-name') || ('Carpeta ' + id);
+            manager.playlistSelection.set(id, { id, name });
+        });
     }
-    if (badge) badge.innerText = '0 carpetas';
-    if (window.clinicManager) {
-        window.clinicManager.showStep('step-playlist');
+    if (manager) {
+        manager.updateFloatingBar();
+        manager.showPlaylistReview();
+        manager.showStep('step-playlist');
     } else {
+        const previewContainer = document.getElementById('playlist-preview-list');
+        const badge = document.getElementById('selected-count-badge');
+        if (previewContainer) {
+            previewContainer.innerHTML = `<div class="text-center py-3 text-white-50 small">No hay carpetas</div>
+                <button type="button" class="btn btn-outline-info btn-sm w-100 mt-2" onclick="clinicManager.showStep('step-dashboard')">Ir a agregar</button>`;
+        }
+        if (badge) badge.innerText = '0 carpetas';
         const dash = document.getElementById('step-dashboard');
         const play = document.getElementById('step-playlist');
         if (dash && play) {
@@ -2314,13 +2330,21 @@ function abrirProgramadorPlaylist() {
 /** Duración por defecto por video (segundos) cuando no está guardada. */
 const DEFAULT_VIDEO_DURATION_SEC = 120;
 
+/** Shuffle array in place (Fisher–Yates). */
+function shuffleInPlace(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+}
+
 /**
  * Construye el orden de reproducción según reglas de intensidad:
  * - Solo el tiempo de los videos BAJA (comunes) cuenta para los intervalos.
  * - Cada 5 min de tiempo de BAJA → se inserta un video ALTA (su duración no cuenta).
  * - Cada 8 min de tiempo de BAJA → se inserta un video MEDIA (su duración no cuenta).
- * - Si se acaban los BAJA pero aún hay ALTA/MEDIA por insertar, se recicla la lista BAJA desde el inicio
- *   para seguir "llenando" tiempo (tanque que se llena con BAJA y se drena con ALTA/MEDIA).
+ * - Si se acaban los BAJA se reciclan desde el inicio; si se acaban ALTA o MEDIA se reciclan
+ *   reordenándolos al azar y se vuelven a usar (mismo contenido, orden distinto cada ciclo).
  * @returns {Array<{video: object, intensity: string}>}
  */
 function buildOrderedSequence(shuffledBaja, shuffledAlta, shuffledMedia) {
@@ -2347,26 +2371,32 @@ function buildOrderedSequence(shuffledBaja, shuffledAlta, shuffledMedia) {
         let chosen = null;
         let intensity = 'BAJA';
 
-        if (ai < alta.length && timeSec >= nextAltaSec) {
+        if (timeSec >= nextAltaSec && alta.length > 0) {
+            if (ai >= alta.length) {
+                shuffleInPlace(alta);
+                ai = 0;
+            }
             chosen = alta[ai++];
             intensity = 'ALTA';
             nextAltaSec += ALTA_INTERVAL_SEC;
-            // NO sumar chosen._dur a timeSec: el tiempo de ALTA no cuenta
-        } else if (mi < media.length && timeSec >= nextMediaSec) {
+        } else if (timeSec >= nextMediaSec && media.length > 0) {
+            if (mi >= media.length) {
+                shuffleInPlace(media);
+                mi = 0;
+            }
             chosen = media[mi++];
             intensity = 'MEDIA';
             nextMediaSec += MEDIA_INTERVAL_SEC;
-            // NO sumar chosen._dur a timeSec: el tiempo de MEDIA no cuenta
         } else if (baja.length > 0) {
             chosen = baja[bi++];
             intensity = 'BAJA';
             timeSec += chosen._dur;
-            if (bi >= baja.length) bi = 0; // Reciclar: volver a usar BAJA desde el inicio para seguir llenando tiempo
-        } else if (ai < alta.length || mi < media.length) {
-            // Sin videos BAJA y aún hay ALTA/MEDIA: avanzar reloj e insertar el siguiente (caso borde)
+            if (bi >= baja.length) bi = 0; // Reciclar BAJA desde el inicio
+        } else if (alta.length > 0 || media.length > 0) {
+            // Sin BAJA pero hay ALTA/MEDIA: avanzar reloj para insertar el siguiente (caso borde)
             timeSec = Math.min(
-                ai < alta.length ? nextAltaSec : Infinity,
-                mi < media.length ? nextMediaSec : Infinity
+                alta.length > 0 ? nextAltaSec : Infinity,
+                media.length > 0 ? nextMediaSec : Infinity
             );
             continue;
         } else {
