@@ -114,14 +114,22 @@ class ScheduleManager {
             if (checkbox) checkbox.checked = true;
         });
 
-        // Actualizamos el contador visual si existe la función
-        if (typeof openScheduleManager === 'function') {
-             // Esto es un truco para refrescar la vista de "seleccionados"
-             // Simplemente actualizamos la variable global
-             window.currentPlaylistSelection = playlist.folders;
-             const badge = document.getElementById('selected-count-badge');
-             if(badge) badge.innerText = `${playlist.folders.length} carpetas (Cargado)`;
+        // Sincronizar playlistSelection y currentPlaylistSelection con la playlist cargada
+        window.currentPlaylistSelection = playlist.folders || [];
+        const manager = window.clinicManager;
+        if (manager && manager.playlistSelection) {
+            manager.playlistSelection.clear();
+            (playlist.folders || []).forEach(folderId => {
+                const id = String(folderId).split(',')[0].trim();
+                const checkbox = document.querySelector(`.folder-checkbox[value="${id}"]`);
+                const name = (checkbox && checkbox.getAttribute('data-name')) || ('Carpeta ' + id);
+                manager.playlistSelection.set(id, { id, name });
+            });
+            manager.updateFloatingBar();
+            if (typeof manager.showPlaylistReview === 'function') manager.showPlaylistReview();
         }
+        const badge = document.getElementById('selected-count-badge');
+        if (badge) badge.innerText = playlist.folders.length ? `${playlist.folders.length} carpetas (Cargado)` : '0 carpetas';
 
         alert(`📂 Playlist "${playlist.name}" cargada en el editor.`);
     }
@@ -397,11 +405,37 @@ class ClinicManager {
                 const newHeaders = { ...headers, 'Authorization': `Bearer ${this.accessToken}` };
                 response = await fetch(url, { ...options, headers: newHeaders });
             }
+            if (response.status === 401) {
+                this.handleSessionExpired();
+            }
             return response;
         } catch (error) {
             console.error("🔥 Error red:", error);
             throw error;
         }
+    }
+
+    /** Sesión expirada o sin acceso: limpia token y vuelve al login. */
+    handleSessionExpired() {
+        try {
+            localStorage.removeItem('google_access_token');
+            localStorage.removeItem('google_token_expiration');
+        } catch (e) {}
+        this.accessToken = null;
+        this.tokenExpiration = 0;
+        alert('Sesión expirada o sin acceso. Inicia sesión de nuevo.');
+        this.renderLoginScreen();
+    }
+
+    /** Cerrar sesión: limpia token y vuelve a la pantalla de login. */
+    logout() {
+        try {
+            localStorage.removeItem('google_access_token');
+            localStorage.removeItem('google_token_expiration');
+        } catch (e) {}
+        this.accessToken = null;
+        this.tokenExpiration = 0;
+        this.renderLoginScreen();
     }
 
     renderLoginScreen() {
@@ -746,9 +780,20 @@ class ClinicManager {
                     btn.onclick = () => this.selectClinic(folder.name, folder.id);
                     this.containerClinics.appendChild(btn);
                 });
+                const logoutBtn = document.createElement('button');
+                logoutBtn.className = 'btn btn-link text-white-50 mt-3';
+                logoutBtn.innerText = 'Cerrar sesión';
+                logoutBtn.onclick = () => this.logout();
+                this.containerClinics.appendChild(logoutBtn);
             }
         } catch (error) { 
-            if(this.containerClinics) this.containerClinics.innerHTML = '<div class="text-danger">Error de conexión</div>';
+            if (this.containerClinics) {
+                this.containerClinics.innerHTML = `
+                    <div class="text-danger mb-3">No se pudieron cargar las clínicas. Comprueba la conexión.</div>
+                    <button type="button" class="btn btn-outline-light" id="btn-retry-clinics">Reintentar</button>`;
+                const btn = document.getElementById('btn-retry-clinics');
+                if (btn) btn.onclick = () => this.loadClinicsFromDrive();
+            }
         }
     }
 
@@ -1226,12 +1271,11 @@ class ClinicManager {
             this.renderFolderList();
             setTimeout(() => this.updateFloatingBar(), 150); 
         } else if (stepId === 'step-playlist') {
+            // Sincronizar currentPlaylistSelection con lo que muestra "Selección actual" (playlistSelection).
             const fromMap = this.playlistSelection && this.playlistSelection.size > 0
                 ? Array.from(this.playlistSelection.keys())
                 : [];
-            if (fromMap.length > 0 && (!window.currentPlaylistSelection || window.currentPlaylistSelection.length === 0)) {
-                window.currentPlaylistSelection = fromMap;
-            }
+            window.currentPlaylistSelection = fromMap;
             if (typeof this.showPlaylistReview === 'function') this.showPlaylistReview();
             if (this.selectionBar) this.selectionBar.classList.remove('active');
         } else {
@@ -1725,6 +1769,7 @@ class VideoPlayer {
         }
         if (this.weatherWidget) this.weatherWidget.style.display = 'block';
 
+        this.startEndDateCheckInterval();
         console.log(`📺 Player iniciado: ${this.orderedSequence.length} ítems`);
         this.playNextWithIntensity();
     }
@@ -1755,8 +1800,45 @@ class VideoPlayer {
         }
         if (this.weatherWidget) this.weatherWidget.style.display = 'block';
 
+        this.startEndDateCheckInterval();
         // 5. Arrancar el ciclo
         this.playNextCycle();
+    }
+
+    /** Comprueba cada minuto si la programación activa ha pasado su fecha fin; si es así, para la TV y vuelve al menú. */
+    startEndDateCheckInterval() {
+        this.stopEndDateCheckInterval();
+        const CHECK_MS = 60000;
+        this.endDateCheckInterval = setInterval(() => {
+            const clinicId = window.clinicManager && window.clinicManager.selectedFolderId;
+            const key = clinicId ? getActiveScheduleKey(clinicId) : null;
+            if (!key) return;
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            let data;
+            try { data = JSON.parse(raw); } catch (e) { return; }
+            const end = data.end;
+            if (!end) return;
+            const now = new Date();
+            const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            if (today <= end) return;
+            this.stopEndDateCheckInterval();
+            if (this.videoElement) this.videoElement.pause();
+            const endFormatted = end.split('-').reverse().join('/');
+            alert(`Programación finalizada (vigencia hasta ${endFormatted}).`);
+            document.body.classList.remove('tv-started');
+            if (this.menu) this.menu.classList.remove('slide-up');
+            if (window.clinicManager) {
+                window.clinicManager.showStep('step-decision');
+            }
+        }, CHECK_MS);
+    }
+
+    stopEndDateCheckInterval() {
+        if (this.endDateCheckInterval) {
+            clearInterval(this.endDateCheckInterval);
+            this.endDateCheckInterval = null;
+        }
     }
 
     resetFlags() {
@@ -1938,6 +2020,10 @@ class VideoPlayer {
         }
         if (!response.ok) {
             this.isLoading = false;
+            if (response.status === 401 && window.clinicManager && typeof window.clinicManager.handleSessionExpired === 'function') {
+                window.clinicManager.handleSessionExpired();
+                return;
+            }
             const next = this.intensityMode ? () => this.playNextWithIntensity() : () => this.playNextCycle();
             if (response.status === 403 || response.status === 404) {
                 console.warn(`⏭ Saltando "${video.name || video.id}": Drive devolvió ${response.status}. Si en la carpeta dice "Procesando", espera a que termine o vuelve a subir el archivo.`);
@@ -2200,12 +2286,12 @@ function guardarPlaylistDesdeUI() {
     const start = startInput.value;
     const end = endInput.value;
     
-    // Recuperar carpetas seleccionadas: currentPlaylistSelection o, si está vacía, playlistSelection (Map)
-    let seleccion = window.currentPlaylistSelection && window.currentPlaylistSelection.length > 0
-        ? window.currentPlaylistSelection
-        : (window.clinicManager && window.clinicManager.playlistSelection && window.clinicManager.playlistSelection.size > 0
-            ? Array.from(window.clinicManager.playlistSelection.keys())
-            : []);
+    // Usar la MISMA fuente que "Selección actual": playlistSelection (checkboxes del constructor).
+    // Así evitamos guardar carpetas de otra playlist cuando el usuario no tiene ninguna seleccionada.
+    const manager = window.clinicManager;
+    let seleccion = (manager && manager.playlistSelection && manager.playlistSelection.size > 0)
+        ? Array.from(manager.playlistSelection.keys())
+        : (window.currentPlaylistSelection && window.currentPlaylistSelection.length > 0 ? window.currentPlaylistSelection : []);
 
     // 4. VALIDACIONES LÓGICAS
     if (!name) {
@@ -2213,7 +2299,7 @@ function guardarPlaylistDesdeUI() {
         return;
     }
     if (seleccion.length === 0) {
-        alert("⚠️ No has seleccionado ninguna carpeta. Marca carpetas en el constructor y luego usa 'Programar playlist' en la barra, o vuelve al constructor y entra de nuevo al programador.");
+        alert("⚠️ No has seleccionado ninguna carpeta. Marca carpetas en el constructor y luego regresa al prorgamador");
         return;
     }
     // Nota: Si quieres permitir guardar sin fechas, quita este if
@@ -2305,6 +2391,67 @@ function borrarPlaylist(id, event) {
     }
 }
 
+/** Exportar playlists de la clínica actual a un archivo JSON. */
+function exportarPlaylistsJSON() {
+    if (!window.scheduleManager || !window.scheduleManager.currentClinicId) {
+        alert('Selecciona una clínica y abre Programación para exportar.');
+        return;
+    }
+    const payload = {
+        clinicId: window.scheduleManager.currentClinicId,
+        playlists: window.scheduleManager.playlists || [],
+        exportedAt: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `playlists_${window.scheduleManager.currentClinicId}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+/** Importar playlists desde un archivo JSON (se fusionan con las actuales de la clínica). */
+function importarPlaylistsJSON(event) {
+    const input = event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    if (!window.scheduleManager || !window.scheduleManager.currentClinicId) {
+        alert('Selecciona una clínica y abre Programación para importar.');
+        input.value = '';
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = function () {
+        try {
+            const data = JSON.parse(reader.result);
+            const list = Array.isArray(data.playlists) ? data.playlists : (data.playlists ? [] : []);
+            if (list.length === 0) {
+                alert('El archivo no contiene playlists válidas.');
+                input.value = '';
+                return;
+            }
+            const existing = window.scheduleManager.playlists || [];
+            const existingIds = new Set(existing.map(p => p.id));
+            let added = 0;
+            list.forEach(p => {
+                if (p && p.id && p.name && Array.isArray(p.folders) && !existingIds.has(p.id)) {
+                    existing.push({ id: p.id, name: p.name, start: p.start || '', end: p.end || '', folders: p.folders });
+                    existingIds.add(p.id);
+                    added++;
+                }
+            });
+            window.scheduleManager.playlists = existing;
+            window.scheduleManager.persist();
+            renderSavedPlaylists();
+            alert(`Se importaron ${added} playlist(s).`);
+        } catch (e) {
+            alert('Error al leer el archivo. Asegúrate de que es un JSON de exportación de playlists.');
+        }
+        input.value = '';
+    };
+    reader.readAsText(file);
+}
+
 // NOTA: verDetallesPlaylist está definida más abajo (línea 1903) con la implementación completa
 // Esta función placeholder fue eliminada para evitar duplicados
 
@@ -2377,14 +2524,19 @@ function abrirProgramadorPlaylist() {
     const manager = window.clinicManager;
     // Sincronizar desde checkboxes al Map de selección (por si solo se marcó checkbox y no la barra)
     const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
-    if (manager && checkboxes.length > 0) {
-        checkboxes.forEach(cb => {
-            const id = cb.value;
-            const name = cb.getAttribute('data-name') || ('Carpeta ' + id);
-            manager.playlistSelection.set(id, { id, name });
-        });
-    }
     if (manager) {
+        // Si no hay checkboxes marcados, limpiar la selección para no arrastrar datos de otra playlist
+        if (checkboxes.length === 0) {
+            manager.playlistSelection.clear();
+        } else {
+            manager.playlistSelection.clear();
+            checkboxes.forEach(cb => {
+                const id = cb.value;
+                const name = cb.getAttribute('data-name') || ('Carpeta ' + id);
+                manager.playlistSelection.set(id, { id, name });
+            });
+        }
+        window.currentPlaylistSelection = Array.from(manager.playlistSelection.keys());
         manager.updateFloatingBar();
         manager.showPlaylistReview();
         manager.showStep('step-playlist');
@@ -2579,13 +2731,9 @@ setTimeout(() => {
     renderSavedPlaylists();
 }, 500);
 
-let playlistSeleccionadaParaReproducir = null; // Variable global temporal
-
 function verDetallesPlaylist(id) {
     const playlist = window.scheduleManager.playlists.find(p => p.id === id);
     if (!playlist) return;
-
-    playlistSeleccionadaParaReproducir = playlist;
 
     document.getElementById('modalPlaylistName').innerText = playlist.name;
     document.getElementById('modalPlaylistDates').innerText = `${playlist.start} al ${playlist.end}`;
@@ -2665,15 +2813,6 @@ function togglePlaylistFolderList(folderId) {
     const isHidden = listEl.style.display === 'none';
     listEl.style.display = isHidden ? 'block' : 'none';
     btn.textContent = isHidden ? '▲ Ocultar lista' : '▼ Ver lista';
-}
-
-function reproducirPlaylistActual() {
-    if (!playlistSeleccionadaParaReproducir) return;
-    
-    alert(`🎬 Iniciando reproducción de: ${playlistSeleccionadaParaReproducir.name}\n(Aquí conectaremos con tu reproductor de video)`);
-    
-    // Aquí es donde en el futuro llamarás a tu función de pantalla completa
-    // Por ejemplo: iniciarReproductor(playlistSeleccionadaParaReproducir.folders);
 }
 
 function desactivarProgramacion() {
